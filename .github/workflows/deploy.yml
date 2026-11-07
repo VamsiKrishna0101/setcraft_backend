@@ -77,7 +77,7 @@ jobs:
               --memory 1Gi \
               --timeout 120s \
               --concurrency 80 \
-              --set-env-vars "NODE_ENV=production,PORT=8000,SOCIAL_AUTH_ENABLED=true" \
+              --set-env-vars "NODE_ENV=production,SOCIAL_AUTH_ENABLED=true" \
               --quiet
           done
 
