@@ -63,6 +63,7 @@
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.12.1",
     "pg": "^8.23.0",
+    "sharp": "^0.33.5",
     "zod": "^4.6.5"
   },
   "devDependencies": {
