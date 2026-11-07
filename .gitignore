@@ -1,0 +1,42 @@
+# Environment variables & secrets (NEVER commit to GitHub/Cloud!)
+.env
+.env.*
+*.env
+!.env.example
+secrets/
+*.pem
+*.key
+credentials.json
+*-firebase-adminsdk-*.json
+
+# Dependencies & Build Output
+node_modules/
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python virtual environment & ML body models
+.body-venv/
+body_models/
+body_diagnostics/
+body_scan_runs/
+bodyimages/
+**/__pycache__/
+
+# Heavy local seed datasets & exports
+exercises.json
+50gymworkouts.json
+seed-results/
+data/food_sources/
+
+# Editor & OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,3 @@
+ALTER TABLE "Onboarding"
+ADD COLUMN "trainingSplit" TEXT NOT NULL DEFAULT 'AUTO',
+ADD COLUMN "customTrainingSplit" JSONB NOT NULL DEFAULT '{}';

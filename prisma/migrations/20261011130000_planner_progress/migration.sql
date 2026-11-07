@@ -1,0 +1,1 @@
+ALTER TABLE "WeeklyPlanRun" ADD COLUMN "progress" JSONB NOT NULL DEFAULT '{}';

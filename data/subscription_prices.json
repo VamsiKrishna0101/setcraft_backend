@@ -1,0 +1,141 @@
+{
+  "trialDays": 14,
+  "androidPackageName": "com.setcraft.app",
+  "products": {
+    "monthly": "setcraft_premium_monthly",
+    "annual": "setcraft_premium_annual"
+  },
+  "basePlans": {
+    "monthly": "monthly",
+    "annual": "annual"
+  },
+  "note": "Draft target prices. Publish in Play Console. The app displays live Play prices; this file cannot change checkout prices.",
+  "countries": {
+    "GB": {
+      "currency": "GBP",
+      "monthly": 10.99,
+      "annual": 84.99,
+      "name": "United Kingdom"
+    },
+    "DE": {
+      "currency": "EUR",
+      "monthly": 12.99,
+      "annual": 99.99,
+      "name": "Germany"
+    },
+    "FR": {
+      "currency": "EUR",
+      "monthly": 12.99,
+      "annual": 99.99,
+      "name": "France"
+    },
+    "NL": {
+      "currency": "EUR",
+      "monthly": 12.99,
+      "annual": 99.99,
+      "name": "Netherlands"
+    },
+    "ES": {
+      "currency": "EUR",
+      "monthly": 12.99,
+      "annual": 99.99,
+      "name": "Spain"
+    },
+    "IT": {
+      "currency": "EUR",
+      "monthly": 12.99,
+      "annual": 99.99,
+      "name": "Italy"
+    },
+    "AT": {
+      "currency": "EUR",
+      "monthly": 12.99,
+      "annual": 99.99,
+      "name": "Austria"
+    },
+    "BE": {
+      "currency": "EUR",
+      "monthly": 12.99,
+      "annual": 99.99,
+      "name": "Belgium"
+    },
+    "FI": {
+      "currency": "EUR",
+      "monthly": 12.99,
+      "annual": 99.99,
+      "name": "Finland"
+    },
+    "IE": {
+      "currency": "EUR",
+      "monthly": 12.99,
+      "annual": 99.99,
+      "name": "Ireland"
+    },
+    "PT": {
+      "currency": "EUR",
+      "monthly": 12.99,
+      "annual": 99.99,
+      "name": "Portugal"
+    },
+    "GR": {
+      "currency": "EUR",
+      "monthly": 12.99,
+      "annual": 99.99,
+      "name": "Greece"
+    },
+    "CH": {
+      "currency": "CHF",
+      "monthly": 12.9,
+      "annual": 99.9,
+      "name": "Switzerland"
+    },
+    "SE": {
+      "currency": "SEK",
+      "monthly": 149,
+      "annual": 1199,
+      "name": "Sweden"
+    },
+    "NO": {
+      "currency": "NOK",
+      "monthly": 149,
+      "annual": 1199,
+      "name": "Norway"
+    },
+    "DK": {
+      "currency": "DKK",
+      "monthly": 99,
+      "annual": 749,
+      "name": "Denmark"
+    },
+    "PL": {
+      "currency": "PLN",
+      "monthly": 49.99,
+      "annual": 399.99,
+      "name": "Poland"
+    },
+    "CZ": {
+      "currency": "CZK",
+      "monthly": 299,
+      "annual": 2399,
+      "name": "Czechia"
+    },
+    "RO": {
+      "currency": "RON",
+      "monthly": 49.99,
+      "annual": 399.99,
+      "name": "Romania"
+    },
+    "IN": {
+      "currency": "INR",
+      "monthly": 399,
+      "annual": 2999,
+      "name": "India"
+    },
+    "US": {
+      "currency": "USD",
+      "monthly": 9.99,
+      "annual": 69,
+      "name": "United States"
+    }
+  }
+}

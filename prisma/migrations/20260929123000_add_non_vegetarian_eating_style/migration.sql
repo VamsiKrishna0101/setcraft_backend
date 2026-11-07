@@ -1,0 +1,4 @@
+ALTER TYPE "EatingStyle" ADD VALUE IF NOT EXISTS 'NON_VEGETARIAN';
+
+ALTER TABLE "Onboarding"
+ADD COLUMN "customEatingStyle" TEXT;

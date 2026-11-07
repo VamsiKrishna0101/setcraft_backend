@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { appLocale, contentLocale } from '../utils/app_locale';
+import { localizedExercise } from '../utils/fitness_locale';
+import { catalogueRows, planCatalogue } from './import_exercise_catalog';
+assert.equal(appLocale('de-CH,de;q=0.9'), 'de-CH');
+assert.equal(contentLocale('de-CH'), 'de');
+assert.equal(appLocale('nb-NO'), 'no');
+assert.equal(appLocale('tr'), 'en');
+const exercise = { id:'stable', name:'English name', bodyPart:'Chest', target:'Pectorals', equipment:'Dumbbell', difficulty:'BEGINNER',
+  instructions:['English step'], description:'English overview', namesByLang:{en:'English name',de:'Deutscher Name'},
+  instructionStepsByLang:{en:['English step'],de:['Deutscher Schritt']}, instructionsByLang:{en:'English overview',de:'Deutscher Überblick'} };
+const localized = localizedExercise(exercise, 'de-CH');
+assert.equal(localized.id, 'stable'); assert.equal(localized.name, 'Deutscher Name');
+assert.equal(localized.canonicalName, 'English name'); assert.equal(localized.bodyPart, 'Chest');
+assert.deepEqual(localized.instructions, ['Deutscher Schritt']); assert.equal(localized.contentLanguage, 'de');
+assert.equal('namesByLang' in localized, false);
+assert.equal(localizedExercise(exercise, 'sv').contentLanguage,'en');
+const existing = [{id:'keep-code',exerciseCode:'0001',name:'Old name'}, {id:'keep-legacy',exerciseCode:null,name:'Legacy name'}];
+const rows = [{exerciseCode:'0001',name:'Updated name'}, {exerciseCode:'0002',name:'Legacy name'}, {exerciseCode:'0003',name:'New name'}];
+assert.deepEqual(planCatalogue(rows, existing).map(row => row.id), ['keep-code','keep-legacy',undefined]);
+assert.throws(() => planCatalogue(rows, [...existing,{id:'duplicate',exerciseCode:'0001',name:'Other'}]), /Duplicate/);
+const collision = planCatalogue([{exerciseCode:'9999',name:'Old name'}],existing)[0];
+assert.equal(collision.id,undefined); assert.equal(collision.row.name,'Old name [9999]');
+assert.equal(existing[0].name,'Old name');
+const source = JSON.parse(fs.readFileSync('data/exercise_catalog.app.json','utf8'));
+const normalized = catalogueRows(source);
+assert.equal(normalized.length, source.length);
+assert.deepEqual(Object.keys(normalized[0].namesByLang).sort(), ['da','de','en','es','fr','it','nl','no','sv']);
+assert.throws(() => catalogueRows([{...source[0],names:{en:'Only English'}}]), /Missing translation/);
+assert.throws(() => catalogueRows([source[0], source[0]]), /duplicate/);
+assert.throws(() => catalogueRows([{...source[0],gif_url:'../secret'}]), /Invalid media/);
+assert.equal(catalogueRows([{...source[0],gif_url:null}])[0].videoUrl, null);
+assert.throws(() => catalogueRows([{...source[0],image:null}]), /Invalid media/);
+const publicGif = `${process.env.EXERCISE_GIF_BASE_URL}/videos/premium-test/0001.gif`;
+assert.equal(catalogueRows([{...source[0],gif_url:publicGif}])[0].videoUrl, publicGif);
+assert.throws(() => catalogueRows([{...source[0],gif_url:'https://unconfigured.example/videos/0001.gif'}]), /Invalid media/);
+console.log('Exercise localization and additive import checks passed. No database writes.');

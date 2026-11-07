@@ -1,0 +1,71 @@
+import assert from 'node:assert/strict';
+import { exercisePresentation, preferredExerciseMedia, exerciseMediaGender } from '../utils/exercise_media';
+import { formatExercise, formatUserWorkout } from '../modules/workout/workout_service';
+import { curatedExercise } from '../graphworkflow/common/catalog';
+import { providerRetryModel } from '../graphworkflow/common/model';
+const {LANGUAGES,buildRecord,stableUuid}=require('./library_catalogue.cjs');
+const {identity,validateSource}=require('./rebuild_exercise_library.cjs');
+const male='https://pub-2111ee02db9e4d4396611479b3804ef3.r2.dev/videos/test/male.mp4';
+const female='https://pub-7d883b21f04e4fdab24b23d2b46ec995.r2.dev/videos/test/female.mp4';
+const variants={male:{url:male},female:{url:female}};
+assert.equal(preferredExerciseMedia(variants,'female')?.url,female);
+assert.equal(preferredExerciseMedia({male:variants.male},'female'),null);
+assert.equal(preferredExerciseMedia({female:variants.female},'male'),null);
+assert.equal(preferredExerciseMedia({female:variants.female},'male'),null);
+assert.equal(preferredExerciseMedia({male:variants.male},'female'),null);
+assert.equal(preferredExerciseMedia(variants,'male')?.url,male);
+assert.equal(preferredExerciseMedia(variants,'female')?.url,female);
+assert.equal(preferredExerciseMedia({female:{url:'https://untrusted.example/x.mp4'}},'female'),null);
+assert.equal(preferredExerciseMedia({female:{url:female+'?token=secret'}},'female'),null);
+assert.equal(preferredExerciseMedia({male:{url:female}},'male'),null);
+assert.equal(preferredExerciseMedia({female:{url:male}},'female'),null);
+assert.equal(preferredExerciseMedia({male:{url:male,posterUrl:female.replace('.mp4','.jpg')}},'male')?.posterUrl,undefined);
+const mediaExercise = {id:'demo',videoUrl:male,thumbnailUrl:male.replace('.mp4','.jpg'),mediaVariants:variants};
+exercisePresentation.run({gender:'FEMALE'},()=>{
+  assert.equal(formatExercise(mediaExercise).url,female);
+  assert.equal(formatExercise({...mediaExercise,mediaVariants:{male:variants.male}}).url,null);
+  assert.equal(formatExercise({...mediaExercise,mediaVariants:null}).url,null);
+  assert.equal(formatExercise(mediaExercise,'male').url,male);
+  const cached = {items:[{workout:{...mediaExercise,url:male}}]};
+  assert.equal(formatUserWorkout(cached).items[0].workout.url,female);
+});
+exercisePresentation.run({gender:'MALE'},()=>{
+  assert.equal(formatExercise(mediaExercise).url,male);
+  assert.equal(formatExercise({...mediaExercise,mediaVariants:{female:variants.female}}).url,null);
+  assert.equal(formatExercise(mediaExercise,'female').url,female);
+});
+assert.equal(providerRetryModel('primary',429),process.env.OPENAI_PLANNER_FALLBACK_MODEL||'primary');
+assert.equal(providerRetryModel('primary',503),process.env.OPENAI_PLANNER_FALLBACK_MODEL||'primary');
+assert.equal(providerRetryModel('primary',401),'primary');assert.equal(providerRetryModel('primary',403),'primary');
+const source=(gender:string,label:string)=>({gender,label,filename:'12341201-'+label+'.mp4',sourceAssetId:'12341201',url:'https://apilyfta.com/static/GymvisualMP4/12341201-'+encodeURIComponent(label)+'.mp4'});
+assert.equal(identity(source('male','Dumbbell-Curl-(male)_Upper-Arms')),identity(source('female','Dumbbell-Curl-(female)_Upper-Arms')));
+assert.notEqual(identity(source('male','Dumbbell-Incline-Curl_Arms')),identity(source('female','Dumbbell-Curl-(female)_Arms')));
+assert.notEqual(identity(source('male','Cable-Curl_Arms')),identity(source('female','Dumbbell-Curl-(female)_Arms')));
+validateSource(source('female','Dumbbell-Curl-(female)_Upper-Arms'));
+assert.throws(()=>validateSource({...source('female','Curl'),url:'https://untrusted.example/test.mp4'}));
+assert.match(stableUuid('a'),/^[\da-f-]{36}$/);assert.equal(stableUuid('a'),stableUuid('a'));assert.notEqual(stableUuid('a'),stableUuid('b'));
+const group:any={id:'group',key:'dumbbell curl',name:'Dumbbell Curl',sources:[{url:'male'},{url:'female'}],publicMetadata:[{exercise_type:'weight_reps'}],existingIds:['existing-stable'],existing:[{id:'existing-stable',exerciseCode:'0001',videoUrl:male}]};
+const content:any={id:'group',name:'Dumbbell Curl',bodyPart:'Upper Arms',primaryMuscles:['Biceps'],secondaryMuscles:['Forearms'],equipment:'Dumbbell',difficulty:'BEGINNER',difficultyReason:'Stable, scalable elbow flexion',movementPattern:'biceps',movementType:'isolation',exerciseType:'weight_reps',trainingLocation:'HOME',requiresBench:false,limitations:[],confidence:'HIGH',reviewReason:'',translations:Object.fromEntries(LANGUAGES.map((l:string)=>[l,{name:'Curl',steps:['Stand with a comfortable stance.','Curl the weights with steady elbows.','Lower with control and breathe steadily.']}]))};
+const assets=new Map([['male',{gender:'male',filename:'m.mp4',publicUrl:male,posterUrl:male.replace('.mp4','.jpg'),width:960,height:540}],['female',{gender:'female',filename:'f.mp4',publicUrl:female,posterUrl:female.replace('.mp4','.jpg'),width:540,height:540}]]);
+const record=buildRecord(group,content,assets,'version');
+assert.equal(record.id,'existing-stable');assert.equal(record.catalogStatus,'READY');assert.equal(record.mediaVariants.female.url,female);
+assert.equal(record.mediaVariants.female.aspectRatio,1);
+assert.equal(preferredExerciseMedia({female:{url:female,aspectRatio:1}},'female')?.aspectRatio,1);
+assert.equal(preferredExerciseMedia({female:{url:female,aspectRatio:-1}},'female')?.aspectRatio,undefined);
+assert.equal(record.difficulty,'BEGINNER');assert.equal(record.coachingMetadata.exerciseType,'weight_reps');
+assert.throws(()=>buildRecord(group,{...content,translations:{en:content.translations.en}},assets,'version'));
+assert.equal(buildRecord(group,{...content,confidence:'REVIEW',reviewReason:'Ambiguous technique'},assets,'v').catalogStatus,'STAGED');
+assert.equal(buildRecord({...group,publicMetadata:[{exercise_type:'duration'}]},content,assets,'v').catalogStatus,'STAGED');
+assert.equal(buildRecord(group,{...content,equipment:'Body Weight'},assets,'v').coachingMetadata.exerciseType,'bodyweight_reps');
+assert.equal(buildRecord(group,{...content,name:'Barbell Snatch'},assets,'v').difficulty,'ADVANCED');
+const exercise:any={id:'test',name:'Dumbbell Curl',target:'Biceps',bodyPart:'Upper Arms',muscleGroup:'Biceps',secondaryMuscles:[],equipment:'Dumbbell',difficulty:'BEGINNER',coachingMetadata:record.coachingMetadata};
+assert.ok(curatedExercise(exercise));
+assert.equal(curatedExercise({...exercise,coachingMetadata:{...record.coachingMetadata,exerciseType:'duration'}}),null);
+assert.equal(curatedExercise({...exercise,coachingMetadata:{...record.coachingMetadata,confidence:'REVIEW'}}),null);
+async function main(){
+ const result=await Promise.all([
+  exercisePresentation.run({gender:'FEMALE'},async()=>{await new Promise(r=>setTimeout(r,20));return preferredExerciseMedia(variants)?.url;}),
+  exercisePresentation.run({gender:'MALE'},async()=>{await new Promise(r=>setTimeout(r,2));return preferredExerciseMedia(variants)?.url;}),
+ ]);assert.deepEqual(result,[female,male]);assert.equal(exerciseMediaGender(),'male');
+ console.log('Library checks passed: stable IDs, distinct movements, all-language gates, review quarantine, difficulty, timed-work exclusion, strict body-style media, and concurrent request isolation. No database writes.');
+}main().catch(e=>{console.error(e);process.exitCode=1;});

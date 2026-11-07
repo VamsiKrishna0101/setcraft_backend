@@ -1,0 +1,32 @@
+# Allowlist the build context: never send local credentials, user photos,
+# caches, diagnostics, virtual environments or database snapshots to a builder.
+**
+!Dockerfile
+!package.json
+!package-lock.json
+!tsconfig.json
+!prisma.config.ts
+!server.ts
+!config/
+!config/**/*.ts
+!graphworkflow/
+!graphworkflow/**/
+!graphworkflow/**/*.ts
+!middleware/
+!middleware/**/*.ts
+!modules/
+!modules/**/
+!modules/**/*.ts
+!modules/support/public/**
+!utils/
+!utils/**/*.ts
+!prisma/
+!prisma/schema.prisma
+!scripts/
+!scripts/*.ts
+!scripts/*.cjs
+!assets/
+!assets/branding/
+!assets/branding/*.json
+!data/
+!data/*.json
