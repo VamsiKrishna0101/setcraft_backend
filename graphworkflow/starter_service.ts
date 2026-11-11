@@ -137,7 +137,7 @@ export async function requestStarter(userId: string, timezone: string) {
       });
       return run.id;
     },
-    { timeout: 20000 },
+    { maxWait: 10000, timeout: 20000 },
   );
   return getRun(userId, id);
 }

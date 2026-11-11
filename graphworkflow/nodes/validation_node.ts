@@ -959,7 +959,7 @@ export async function assembleNode(
   ];
   if (limitedHome)
     warnings.push(
-      "Your equipment does not currently support a suitable pulling exercise. Add appropriate resistance equipment to include pulling work.",
+      "No rows or pull-ups are possible with your current equipment, so upper-back work uses floor exercises. A resistance band or a doorway pull-up bar unlocks proper pulling work.",
     );
 
   if (snapshot.coverage.weeksWithLogs < 3) {

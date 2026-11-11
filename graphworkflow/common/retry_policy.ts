@@ -40,6 +40,8 @@ export function canRetryPlan(code: string | null, attempts: number) {
       transientCodes.has(code) ||
       [
         "MODEL_RESPONSE_INVALID",
+        // A user-started retry can produce a valid plan; never a dead end.
+        "PLAN_QUALITY",
         "AI_CONSENT_REQUIRED",
         "INVALID_TRANSLATION",
         "INCOMPLETE_WORKFLOW",

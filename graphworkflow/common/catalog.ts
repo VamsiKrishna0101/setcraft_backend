@@ -177,6 +177,18 @@ const normalizeName = (value: string) =>
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 
+/** True when the user confirmed one of these items (or, without item-level answers, the category). */
+export function hasEquipmentItem(
+  profile: Profile,
+  tokens: string[],
+  category?: string,
+) {
+  const equipmentIds = profile.equipmentIds.map(normalizeName);
+  return equipmentIds.length
+    ? equipmentIds.some((id) => tokens.includes(id))
+    : !!category && profile.equipment.includes(category);
+}
+
 export function equipmentAllowed(candidate: Candidate, profile: Profile) {
   const equipmentIds = profile.equipmentIds.map(normalizeName);
 

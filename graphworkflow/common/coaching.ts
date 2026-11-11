@@ -245,7 +245,7 @@ export function experiencePrompt(snapshot: Snapshot) {
         : "EXPERIENCED POLICY: prioritise the stated goal and focus muscles within demonstrated workload tolerance. Preserve comparable anchor lifts. Novel exercise loads remain unknown. Do not add advanced intensity techniques or complex periodisation merely to look sophisticated.";
   const environment =
     programme.environment === "HOME_BODYWEIGHT"
-      ? "HOME BODYWEIGHT POLICY: use only verified equipment. Choose a manageable regression; bodyweight does not imply easy. Progress reps before a harder variation. Do not invent a safe anchor, bench or towel setup. Report an equipment gap rather than inventing a pulling movement."
+      ? "HOME BODYWEIGHT POLICY: use only verified equipment. Choose a manageable regression; bodyweight does not imply easy. Progress reps before a harder variation. Do not invent a safe anchor, bench or towel setup. Without a bar, band or suspension trainer, train the upper back with the eligible floor exercises (prone raises, supermans, reverse snow angels); never invent a row or anchor setup."
       : programme.environment === "HOME_EQUIPMENT"
         ? "HOME EQUIPMENT POLICY: use the exact available equipment and bench requirements. Keep setup practical and explain reps-first progression when available load is unknown. Do not assume a full gym or interchangeable machine/dumbbell loads."
         : "GYM/MIXED POLICY: use the supplied equipment inventory. Stable machines and supported movements are valid choices. Minimise unnecessary station changes; keep productive free-weight or bodyweight movements when demonstrated performance supports them.";

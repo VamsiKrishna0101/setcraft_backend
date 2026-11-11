@@ -170,7 +170,10 @@ export function workloadOverages(
   return overages;
 }
 
-/** Balance overlapping regional work without dropping movements or inventing loads. */
+/**
+ * Balance overlapping regional work without inventing loads. Sets are trimmed
+ * first; only redundant same-region accessories are ever removed.
+ */
 export function balanceWeeklyWorkload(
   snapshot: Snapshot,
   workouts: WeeklyPlan["workouts"],
@@ -179,36 +182,19 @@ export function balanceWeeklyWorkload(
   const byId = new Map(
     snapshot.candidates.map((candidate) => [candidate.id, candidate]),
   );
-  const exercises = balanced.flatMap((day) => day.exercises);
-  const removableSets = exercises.reduce(
-    (sum, exercise) => sum + Math.max(0, exercise.sets - 2),
-    0,
-  );
-  for (let remaining = removableSets; remaining > 0; remaining--) {
-    const overages = workloadOverages(snapshot, balanced);
-    if (!overages.length) break;
-    let selected: ExercisePlan | undefined;
-    let bestScore = 0;
-    for (const exercise of exercises) {
-      if (exercise.sets <= 2) continue;
-      const candidate = byId.get(exercise.exerciseId);
-      if (!candidate) continue;
-      const relief = overages.reduce((sum, overage) => {
-        const contribution = candidate.primary.includes(overage.muscle)
-          ? 1
-          : candidate.secondary.includes(overage.muscle)
-            ? 0.5
-            : 0;
-        return sum + Math.min(contribution, overage.work - overage.ceiling);
-      }, 0);
-      // Preserve main compound work when a smaller accessory adjustment suffices.
-      const score = relief > 0 ? relief + (candidate.compound ? 0 : 0.1) : 0;
-      if (score > bestScore) {
-        selected = exercise;
-        bestScore = score;
-      }
-    }
-    if (!selected) break;
+  const relief = (exercise: ExercisePlan, overages: ReturnType<typeof workloadOverages>) => {
+    const candidate = byId.get(exercise.exerciseId);
+    if (!candidate) return 0;
+    return overages.reduce((sum, overage) => {
+      const contribution = candidate.primary.includes(overage.muscle)
+        ? 1
+        : candidate.secondary.includes(overage.muscle)
+          ? 0.5
+          : 0;
+      return sum + Math.min(contribution, overage.work - overage.ceiling);
+    }, 0);
+  };
+  const dropSet = (selected: ExercisePlan) => {
     selected.setPrescriptions.pop();
     selected.sets = selected.setPrescriptions.length;
     selected.repsMin = selected.repsMax = Math.max(
@@ -218,7 +204,67 @@ export function balanceWeeklyWorkload(
       .map((set) => set.weightKg)
       .filter((weight): weight is number => weight != null);
     selected.weightKg = weights.length ? Math.max(...weights) : null;
+  };
+
+  // Returns true once no muscle is over its ceiling.
+  const trimTo = (floor: (exercise: ExercisePlan) => number) => {
+    for (;;) {
+      const overages = workloadOverages(snapshot, balanced);
+      if (!overages.length) return true;
+      let selected: ExercisePlan | undefined;
+      let bestScore = 0;
+      for (const exercise of balanced.flatMap((day) => day.exercises)) {
+        if (exercise.sets <= floor(exercise)) continue;
+        const value = relief(exercise, overages);
+        // Preserve main compound work when a smaller accessory adjustment suffices.
+        const score =
+          value > 0 ? value + (byId.get(exercise.exerciseId)?.compound ? 0 : 0.1) : 0;
+        if (score > bestScore) {
+          selected = exercise;
+          bestScore = score;
+        }
+      }
+      if (!selected) return false;
+      dropSet(selected);
+    }
+  };
+
+  // Least disruptive first: everything keeps two working sets, then isolation
+  // accessories may drop to one set.
+  if (trimTo(() => 2)) return balanced;
+  if (trimTo((e) => (byId.get(e.exerciseId)?.compound ? 2 : 1))) return balanced;
+
+  // Then remove a redundant accessory whose region keeps another exercise on
+  // the same day, so every assigned region stays covered.
+  for (;;) {
+    const overages = workloadOverages(snapshot, balanced);
+    if (!overages.length) return balanced;
+    let target: { day: (typeof balanced)[number]; index: number } | undefined;
+    let bestScore = 0;
+    for (const day of balanced) {
+      day.exercises.forEach((exercise, index) => {
+        const candidate = byId.get(exercise.exerciseId);
+        if (!candidate || candidate.compound) return;
+        const covered = day.exercises.some(
+          (other, otherIndex) =>
+            otherIndex !== index &&
+            byId.get(other.exerciseId)?.region === candidate.region,
+        );
+        if (!covered) return;
+        const value = relief(exercise, overages);
+        if (value > bestScore) {
+          bestScore = value;
+          target = { day, index };
+        }
+      });
+    }
+    if (!target) break;
+    target.day.exercises.splice(target.index, 1);
   }
+
+  // Last resort before failing the plan: a single working set of a compound is
+  // still a useful, recoverable dose.
+  trimTo(() => 1);
   // Unresolvable coverage or volume problems still fail the full validator.
   return balanced;
 }

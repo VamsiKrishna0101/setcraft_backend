@@ -84,7 +84,24 @@ export async function processNextPlan() {
       },
     });
 
-    const run = await prisma.$transaction(transaction => claimPlanRun(transaction, leaseToken, now));
+    // Most polls find nothing. Check without opening a transaction so idle
+    // polling does not hold pooled connections or queue behind API requests.
+    const claimable = await prisma.weeklyPlanRun.findFirst({
+      where: {
+        status: { in: ['QUEUED', 'RUNNING'] },
+        attempts: { lt: MAX_PLAN_ATTEMPTS },
+        OR: [{ leaseUntil: { lte: now } }, { leaseUntil: null }],
+      },
+      select: { id: true },
+    });
+    if (!claimable) return false;
+
+    // The Supabase transaction pooler can take a few seconds to hand out a
+    // connection under load; Prisma's 2 s default made polls fail repeatedly.
+    const run = await prisma.$transaction(
+      transaction => claimPlanRun(transaction, leaseToken, now),
+      { maxWait: 10000, timeout: 15000 },
+    );
 
     if (!run) {
       return false;

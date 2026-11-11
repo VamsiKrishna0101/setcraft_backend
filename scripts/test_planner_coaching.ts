@@ -224,13 +224,40 @@ async function main() {
     else {
       assert.equal(day.warmup?.durationMinutes, 5);
       assert.equal(day.warmup?.steps.reduce((sum,s)=>sum+s.seconds,0), 300);
-      assert.equal(day.warmup?.steps[1]?.exerciseId, day.exercises[0]?.exerciseId);
-      assert.equal(day.warmup?.steps[1]?.weightKg, null);
+      const practice = day.warmup!.steps.filter(s => s.exerciseId);
+      assert(practice.length >= 1, 'The warm-up rehearses the first exercise');
+      assert(practice.every(s => s.exerciseId === day.exercises[0]?.exerciseId));
+      assert.equal(day.warmup!.steps.at(-1)?.exerciseId, day.exercises[0]?.exerciseId, 'Rehearsal comes last, right before working sets');
+      assert.equal(practice[0]?.weightKg, null);
     }
   }
   const tampered = structuredClone(parsed);
-  tampered.workouts.find(d=>!d.restDay)!.warmup!.steps[1]!.weightKg = 999;
+  tampered.workouts.find(d=>!d.restDay)!.warmup!.steps.find(s=>s.exerciseId)!.weightKg = 999;
   assert.throws(()=>validatePlan(prepared.snapshot,tampered), /Warm-up/);
+  {
+    const {buildWarmup} = await import('../graphworkflow/common/warmup');
+    const day = parsed.workouts.find(d => !d.restDay)!;
+    const warm = (edit: (s: typeof prepared.snapshot) => void) => {
+      const snapshot = structuredClone(prepared.snapshot);
+      edit(snapshot);
+      return buildWarmup(snapshot, day.exercises)!;
+    };
+    assert.deepEqual(
+      warm(s => { s.profile.gender = 'FEMALE'; }),
+      warm(s => { s.profile.gender = 'MALE'; }),
+      'Gender never changes the warm-up',
+    );
+    const bodyweightOnly = warm(s => { s.profile.location = 'HOME'; s.profile.equipmentIds = ['bodyweight_only']; s.profile.equipment = []; });
+    const text = JSON.stringify(bodyweightOnly);
+    assert(!/band|pull-?up bar|hang from the bar|dip/i.test(text), 'No equipment the user lacks');
+    const german = warm(s => { s.profile.language = 'de'; });
+    assert(/Nur zur Vorbereitung/.test(german.note), 'Warm-up copy follows the app language');
+    assert(!/ß/.test(JSON.stringify(warm(s => { s.profile.language = 'de-CH'; }))), 'Swiss German uses ss');
+    const shoulder = warm(s => { s.profile.limitations = ['SHOULDER']; });
+    assert(!/Incline push-ups|Scapular pulls/.test(JSON.stringify(shoulder)), 'Shoulder limits get gentler upper-body activation');
+    for (const w of [bodyweightOnly, german, shoulder])
+      assert.equal(w.steps.reduce((sum, s) => sum + s.seconds, 0), 300);
+  }
   const targetProfile = {weight:70,height:170,age:30,gender:'FEMALE',activityLevel:'MODERATE',workingToward:'LOSE_BODY_FAT'};
   const loss = nutritionTargets(targetProfile);
   const maintenance = nutritionTargets({...targetProfile,workingToward:'GET_STRONGER'});
@@ -376,7 +403,7 @@ async function main() {
           .filter((d) => !d.restDay)
           .every((d) => d.exercises.length >= 3),
       );
-      assert(planned.plan.warnings.some((w) => w.includes("pulling exercise")));
+      assert(planned.plan.warnings.some((w) => w.includes("pulling work")));
       assert(
         planned.plan.workouts
           .flatMap((d) => d.exercises)
