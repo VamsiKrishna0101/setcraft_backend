@@ -14,7 +14,7 @@ export class McpError extends Error {
   constructor(public status: number, public code: string, message: string, public retryAfter?: number) { super(message); }
 }
 
-function hashKey() {
+export function hashKey() {
   const value = process.env.MCP_TOKEN_HASH_KEY_BASE64 ?? '';
   const key = Buffer.from(value, 'base64');
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value) || key.length !== 32)

@@ -2,7 +2,7 @@ FROM node:22-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 # Client generation needs a URL in Prisma's config, but never connects to it.
-RUN DATABASE_URL=postgresql://build:build@localhost:5432/build npm ci
+RUN DATABASE_URL=postgresql://build:build@localhost:5432/build npm install
 COPY . .
 RUN DATABASE_URL=postgresql://build:build@localhost:5432/build npm run generate
 RUN npm run build && npm prune --omit=dev

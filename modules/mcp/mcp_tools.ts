@@ -87,10 +87,16 @@ export const mcpTools: Tool[] = [
   {name: 'get_measurement_trends', scope: 'measurements:read', description: 'Read manually entered body measurements and their units/sources. Excludes photos, visual ratings and inferred photo measurements.', schema: paged,
     read: async (db, userId, args) => {
       const window = dateRange(args);
-      const rows = await db.bodyAssessment.findMany({where: {userId, status: 'SAVED', method: 'entered', recordedDate: {gte: window.from, lte: window.to}},
-        orderBy: [{recordedDate: 'desc'}, {id: 'desc'}], take: args.limit + 1, skip: (args.page - 1) * args.limit,
+      // Filter preview/synthetic rows before paginating so pages are never
+      // short and hasMore stays accurate. A 90-day window is small.
+      const all = await db.bodyAssessment.findMany({where: {userId, status: 'SAVED', method: 'entered', recordedDate: {gte: window.from, lte: window.to}},
+        orderBy: [{recordedDate: 'desc'}, {id: 'desc'}], take: 1001,
         select: {recordedDate: true, metrics: true, analysisVersion: true, quality: true}});
-      const entries = rows.slice(0, args.limit).filter(isRealBodyEntry).map(row => ({date: row.recordedDate,
+      if (all.length > 1000) throw new McpError(400, 'SMALLER_RANGE', 'Choose a shorter date range for this summary.');
+      const real = all.filter(isRealBodyEntry);
+      const start = (args.page - 1) * args.limit;
+      const rows = real.slice(start, start + args.limit + 1);
+      const entries = rows.slice(0, args.limit).map(row => ({date: row.recordedDate,
         metrics: Object.fromEntries(Object.entries((row.metrics ?? {}) as Record<string, any>)
           .filter(([, m]) => ['tape', 'scale', 'smart_scale', 'dexa', 'calipers'].includes(m?.source))
           .map(([k, m]) => [k, {value: m.value, unit: m.unit, source: m.source}]))}));

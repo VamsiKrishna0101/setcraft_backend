@@ -7,6 +7,12 @@ import redis from "../../config/redis";
 import { progressRevision } from "../progress/progress_cache";
 import { contentLocale } from "../../utils/app_locale";
 import { FoodCatalogQuery } from "./nutrition_types";
+import {
+  filterAndRankFoods,
+  getStemVariants,
+  tokenMatchesText,
+  CANONICAL_FOOD_ALIASES,
+} from "./food_search";
 
 let names: Record<string, Record<string, string>> = {};
 let namesUpdatedAt = 0;
@@ -60,8 +66,8 @@ export async function getFoodCatalogPage(
   const personal = query.source !== "LIBRARY";
   const revision = personal ? await progressRevision(userId) : "";
   const key = personal
-    ? `usernutrition:${userId}:foods:generic-300-v1:${revision}:${language}:${JSON.stringify(query)}`
-    : `nutrition_items:generic-300-v1:page:${namesUpdatedAt}:${language}:${JSON.stringify(query)}`;
+    ? `usernutrition:${userId}:foods:generic-300-v2:${revision}:${language}:${JSON.stringify(query)}`
+    : `nutrition_items:generic-300-v2:page:${namesUpdatedAt}:${language}:${JSON.stringify(query)}`;
 
   try {
     const cached = await redis.get<any>(key);
@@ -92,21 +98,49 @@ export async function getFoodCatalogPage(
       Prisma.sql`category = ${query.category}::"NutritionCategory"`,
     );
 
-  for (const term of query.search.split(/\s+/).filter(Boolean)) {
-    const escaped = term.replace(/[\\%_]/g, "\\$&");
-    const ids = Object.entries(translations)
-      .filter(([, values]) =>
-        values[language]
-          ?.toLocaleLowerCase()
-          .includes(term.toLocaleLowerCase()),
-      )
-      .map(([id]) => id);
+  const searchTrimmed = query.search.trim().toLowerCase();
+  const isSearching = searchTrimmed.length > 0;
 
-    conditions.push(
-      ids.length && query.source === "LIBRARY"
-        ? Prisma.sql`(name ILIKE ${`%${escaped}%`} OR brand ILIKE ${`%${escaped}%`} OR id IN (${Prisma.join(ids)}))`
-        : Prisma.sql`(name ILIKE ${`%${escaped}%`} OR brand ILIKE ${`%${escaped}%`})`,
-    );
+  if (isSearching) {
+    const aliasIds = CANONICAL_FOOD_ALIASES[searchTrimmed] || [];
+    const searchTerms = searchTrimmed.split(/\s+/).filter(Boolean);
+    const translatedIds: string[] = [];
+
+    if (query.source === "LIBRARY") {
+      for (const [id, values] of Object.entries(translations)) {
+        const transText = values[language] || values.en || "";
+        if (searchTerms.every((term) => tokenMatchesText(transText, term))) {
+          translatedIds.push(id);
+        }
+      }
+    }
+
+    const candidateIds = Array.from(new Set([...aliasIds, ...translatedIds]));
+
+    const termConditions: Prisma.Sql[] = [];
+    for (const term of searchTerms) {
+      const variants = getStemVariants(term);
+      const variantSqls: Prisma.Sql[] = [];
+      for (const v of variants) {
+        const escaped = v.replace(/[\\%_]/g, "\\$&");
+        variantSqls.push(Prisma.sql`name ILIKE ${`%${escaped}%`}`);
+        variantSqls.push(Prisma.sql`brand ILIKE ${`%${escaped}%`}`);
+      }
+      if (candidateIds.length > 0) {
+        variantSqls.push(Prisma.sql`id IN (${Prisma.join(candidateIds)})`);
+      }
+      termConditions.push(Prisma.sql`(${Prisma.join(variantSqls, " OR ")})`);
+    }
+
+    if (termConditions.length > 0) {
+      if (aliasIds.length > 0) {
+        conditions.push(
+          Prisma.sql`(${Prisma.join(termConditions, " AND ")} OR id IN (${Prisma.join(aliasIds)}))`,
+        );
+      } else {
+        conditions.push(Prisma.sql`(${Prisma.join(termConditions, " AND ")})`);
+      }
+    }
   }
 
   if (query.focus !== "ALL") {
@@ -128,6 +162,80 @@ export async function getFoodCatalogPage(
   const where = Prisma.join(conditions, " AND ");
   const protein = Prisma.sql`CASE WHEN "servingUnit" = 'g' THEN "proteinPerServing" * 100 / NULLIF("servingSize", 0) END`;
   const calories = Prisma.sql`CASE WHEN "servingUnit" = 'g' THEN "caloriesPerServing" * 100 / NULLIF("servingSize", 0) END`;
+
+  if (isSearching) {
+    const result = await prisma.$transaction(
+      async (tx) => {
+        const candidateFoods = await tx.$queryRaw<
+          Array<Omit<Nutrition, "sourceDetails">>
+        >(Prisma.sql`
+        SELECT id, name, brand, category, "imageUrl", barcode, "servingSize", "servingUnit",
+          "caloriesPerServing", "proteinPerServing", "carbsPerServing", "fatPerServing",
+          "fiberPerServing", "sugarPerServing", "sodiumPerServing", "mealTypes", "isVerified",
+          "userId", "sourceName", "sourceFoodCode", "sourceVersion", "sourceUrl", "sourceDetails", "createdAt", "updatedAt"
+        FROM "Nutrition" WHERE ${where}`);
+
+        const ranked = filterAndRankFoods(
+          candidateFoods as any[],
+          query.search,
+          {
+            category: query.category,
+            focus: query.focus,
+            language,
+            foodTranslations: translations,
+          },
+        );
+
+        if (query.sort === "PROTEIN") {
+          ranked.items.sort((a, b) => {
+            const pa =
+              a.servingSize && a.servingSize > 0
+                ? ((a.proteinPerServing ?? 0) * 100) / a.servingSize
+                : -1;
+            const pb =
+              b.servingSize && b.servingSize > 0
+                ? ((b.proteinPerServing ?? 0) * 100) / b.servingSize
+                : -1;
+            return pb - pa;
+          });
+        } else if (query.sort === "CALORIES") {
+          ranked.items.sort((a, b) => {
+            const ca =
+              a.servingSize && a.servingSize > 0
+                ? ((a.caloriesPerServing ?? 0) * 100) / a.servingSize
+                : 9999;
+            const cb =
+              b.servingSize && b.servingSize > 0
+                ? ((b.caloriesPerServing ?? 0) * 100) / b.servingSize
+                : 9999;
+            return ca - cb;
+          });
+        }
+
+        const total = ranked.total;
+        const totalPages = Math.ceil(total / query.pageSize);
+        const page = Math.min(query.page, Math.max(1, totalPages));
+        const offset = (page - 1) * query.pageSize;
+        const pageFoods = ranked.items.slice(offset, offset + query.pageSize);
+
+        return {
+          foods: pageFoods.map((food) => localizedFood(food as any, language)),
+          page,
+          pageSize: query.pageSize,
+          total,
+          totalPages,
+          hasNextPage: page < totalPages,
+        };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+
+    try {
+      await redis.set(key, result, { ex: personal ? 60 : 3600 });
+    } catch {}
+    return result;
+  }
+
   const order =
     query.source === "RECENT" && query.sort === "NAME"
       ? Prisma.sql`(SELECT MAX(log."createdAt") FROM "UserMealLog" log

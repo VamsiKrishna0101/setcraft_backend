@@ -6,10 +6,12 @@ export { prices };
 
 export const androidPurchase = z.object({
   purchaseToken: z.string().min(10).max(4096),
+  creatorCode: z.string().max(64).optional(),
 });
 export const iosPurchase = z.object({
   transactionId: z.string().regex(/^\d{1,64}$/),
   signedTransaction: z.string().min(10).max(32000).optional(),
+  creatorCode: z.string().max(64).optional(),
 });
 
 export class SubscriptionError extends Error {

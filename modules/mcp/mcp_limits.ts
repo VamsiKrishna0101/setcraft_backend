@@ -1,13 +1,12 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import { rateLimitRedis } from '../../config/redis';
 import { consumeRateLimit, LimitBucket } from '../../middleware/rate_limit';
-import { McpError, McpPrincipal } from './mcp_tokens';
+import { hashKey, McpError, McpPrincipal } from './mcp_tokens';
 
 // Separate namespace from app browsing. All instances share Redis counters.
 function identity(value: string) {
-  const key = process.env.MCP_TOKEN_HASH_KEY_BASE64;
-  if (!key) throw new McpError(503, 'MCP_UNAVAILABLE', 'AI connections are temporarily unavailable.');
-  return createHmac('sha256', Buffer.from(key, 'base64')).update('mcp-limit:' + value).digest('hex');
+  // Same validation as token hashing: a malformed key never yields weak buckets.
+  return createHmac('sha256', hashKey()).update('mcp-limit:' + value).digest('hex');
 }
 export function mcpBuckets(p: McpPrincipal, toolCall: boolean): LimitBucket[] {
   const user = identity(p.userId), token = identity(p.tokenId);

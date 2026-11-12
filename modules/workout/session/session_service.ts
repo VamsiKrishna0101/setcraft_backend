@@ -288,10 +288,14 @@ export async function saveSessionSet(userId: string, date: string, itemId: strin
   return result;
 }
 
-function validateLoggedLoad(item: {workout: {equipment: string; coachingMetadata: unknown}}, sets: Array<{weight: number | null}>) {
+// Matches the planner (graphworkflow/common/catalog.ts): body-weight and
+// no-equipment movements never require a logged load, whatever the catalogue
+// modality says.
+function validateLoggedLoad(item: {setTargets?: unknown; workout: {equipment: string; coachingMetadata: unknown}}, sets: Array<{weight: number | null}>) {
   const modality = (item.workout.coachingMetadata as {exerciseType?: string} | null)?.exerciseType;
-  const bodyweight = modality === 'bodyweight_reps' || (!modality &&
-    item.workout.equipment.toLowerCase().replace(/[\s_-]/g, '') === 'bodyweight');
+  const bodyweight = modality === 'bodyweight_reps' ||
+    (item.setTargets as {weightBasis?: string} | null | undefined)?.weightBasis === 'bodyweight' ||
+    /body ?weight|^none$/i.test(item.workout.equipment.replace(/[_-]/g, ' ').trim());
   if (!bodyweight && sets.some(set => set.weight == null || set.weight <= 0)) {
     throw new WorkoutError('Enter the weight you lifted before saving this set.');
   }

@@ -1,6 +1,11 @@
 import prisma from "../../config/prisma";
 import redis from "../../config/redis";
 import { localizedFood } from "./food_catalog_service";
+import {
+  filterAndRankFoods,
+  getStemVariants,
+  CANONICAL_FOOD_ALIASES,
+} from "./food_search";
 import { realMealWhere } from "../../utils/real_data";
 import { calcTargets } from "../home/home_service";
 import {
@@ -102,7 +107,7 @@ export async function createNutritionItem(input: NutritionInput) {
 export async function getAllNutritionItems(
   filters: GetAllNutritionFilter = {},
 ) {
-  const cacheKey = `nutrition_items:generic-300-v1:${JSON.stringify(filters)}`;
+  const cacheKey = `nutrition_items:generic-300-v2:${JSON.stringify(filters)}`;
   const cached = await redis.get<any[]>(cacheKey).catch(() => null);
   if (cached) return cached;
 
@@ -111,9 +116,13 @@ export async function getAllNutritionItems(
   if (filters.barcode) where.barcode = filters.barcode;
   if (filters.mealType) where.mealTypes = { has: filters.mealType };
   if (filters.search) {
+    const rawSearch = filters.search.trim().toLowerCase();
+    const variants = getStemVariants(rawSearch);
+    const aliasIds = CANONICAL_FOOD_ALIASES[rawSearch] || [];
     where.OR = [
-      { name: { contains: filters.search, mode: "insensitive" } },
-      { brand: { contains: filters.search, mode: "insensitive" } },
+      ...variants.map((v) => ({ name: { contains: v, mode: "insensitive" } })),
+      ...variants.map((v) => ({ brand: { contains: v, mode: "insensitive" } })),
+      ...(aliasIds.length > 0 ? [{ id: { in: aliasIds } }] : []),
     ];
   }
 
@@ -123,7 +132,12 @@ export async function getAllNutritionItems(
     omit: { photoData: true, photoMime: true },
   });
 
-  const visible = items.map((item) => localizedFood(item, "en"));
+  let visible = items.map((item) => localizedFood(item, "en"));
+  if (filters.search) {
+    const ranked = filterAndRankFoods(visible, filters.search);
+    visible = ranked.items;
+  }
+
   await redis.set(cacheKey, visible, { ex: NUTRITION_ITEMS_CACHE_TTL });
   return visible;
 }

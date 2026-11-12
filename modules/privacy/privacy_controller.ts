@@ -6,7 +6,21 @@ import {
     deleteUserAccount,
     getPrivacyConsent,
     updatePrivacyConsent,
+    getSignInMethods,
 } from "./privacy_service";
+
+export async function handleGetSignInMethods(req: Request, res: Response, next: NextFunction) {
+    const userId = req.user?.userId || (req as any).user?.id;
+    if (!userId) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+    }
+    try {
+        res.status(200).json({ data: await getSignInMethods(userId) });
+    } catch (e) {
+        next(e);
+    }
+}
 
 export async function handleExportUserData(req: Request, res: Response, next: NextFunction) {
     const userId = req.user?.userId || (req as any).user?.id;

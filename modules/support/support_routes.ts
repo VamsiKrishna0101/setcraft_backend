@@ -11,6 +11,10 @@ import { createTicketInput, replyInput, adminReplyInput, adminUpdateInput, listT
 export function createSupportRouter(deps: {auth?:RequestHandler; createLimit?:RequestHandler; replyLimit?:RequestHandler; service?:typeof service} = {}) {
   const router=Router(), api=deps.service ?? service;
   router.get("/config",(_req,res)=>res.set('Cache-Control','no-store').json({data:supportConfig()}));
+  router.get("/rate",(_req,res)=>{
+    const target=process.env.APP_REVIEW_URL||process.env.RATE_APP_URL||"https://setcraft.app";
+    res.redirect(302, target.trim());
+  });
   router.use(deps.auth ?? authenticateStrict);
   router.use(express.json({limit:"2mb"}));
   router.use((_req,res,next)=>{res.set("Cache-Control","no-store"); next();});

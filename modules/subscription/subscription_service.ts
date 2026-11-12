@@ -78,7 +78,10 @@ export async function getmysubscription(userId: string, refresh = true, platform
     paid?.currentPeriodEnd ?? null,
     now,
   );
-  const state = nativeTrial ? 'trial' : baseState === 'available' && subscriptions.length ? 'expired' : baseState;
+  // RevenueCat sync stores a placeholder row for customers who never purchased.
+  // Only a real past purchase makes an otherwise available account expired.
+  const purchased = subscriptions.some(plan => plan.status !== 'EXPIRED' || plan.storeProductId || plan.gatewayProvider !== revenueCatProvider());
+  const state = nativeTrial ? 'trial' : baseState === 'available' && purchased ? 'expired' : baseState;
 
   return {
     state,
@@ -96,13 +99,11 @@ export async function getmysubscription(userId: string, refresh = true, platform
     cancelAtPeriodEnd: paid?.cancelAtPeriodEnd ?? false,
     paymentIssue: paid?.status === "PAST_DUE",
     billingReady:
-      (revenueCatEnabled() ? revenueCatReady() : platform === 'ios' ? appleBillingReady() : billingReady()) &&
-      ((revenueCatEnabled() && revenueCatSandbox()) || (!!legalUrl(process.env.SUBSCRIPTION_TERMS_URL) &&
-      !!legalUrl(process.env.SUBSCRIPTION_PRIVACY_URL))),
+      (revenueCatEnabled() ? revenueCatReady() : platform === 'ios' ? appleBillingReady() : billingReady()),
     billingProvider: revenueCatEnabled() ? 'revenuecat' : 'native',
     revenueCatAppUserId: userId,
-    termsUrl: legalUrl(process.env.SUBSCRIPTION_TERMS_URL) || testInformationUrl('terms'),
-    privacyUrl: legalUrl(process.env.SUBSCRIPTION_PRIVACY_URL) || testInformationUrl('privacy'),
+    termsUrl: legalUrl(process.env.SUBSCRIPTION_TERMS_URL) || "https://sites.google.com/view/setcraft-legal/terms-of-use",
+    privacyUrl: legalUrl(process.env.SUBSCRIPTION_PRIVACY_URL) || "https://sites.google.com/view/setcraft-legal",
     accountId: billingAccountId(userId),
     appleAccountId: userId,
     products: platform === 'ios' ? appleProducts() : prices.products,

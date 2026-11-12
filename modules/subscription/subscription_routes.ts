@@ -12,9 +12,11 @@ import {
   verifyIos,
   appleNotification,
 } from "./subscription_controller";
+import { validateCreatorCode, applyCreatorCode, getCreatorReport } from "./creator_controller";
 
 const router = Router();
 router.use(subscriptionTestPages);
+router.post("/creator-code/validate", validateCreatorCode);
 
 // Pub/Sub verifies Google's identity; it never accepts a user's JWT as publisher proof.
 router.post("/google/notifications", googleNotification);
@@ -28,5 +30,7 @@ router.post("/start-trial", trial);
 router.post("/trial", trial);
 router.post("/android/verify", verify);
 router.post('/ios/verify', verifyIos);
+router.post("/creator-code/apply", applyCreatorCode);
+router.get("/creator-code/report", getCreatorReport);
 
 export default router;

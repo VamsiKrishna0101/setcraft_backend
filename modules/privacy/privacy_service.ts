@@ -5,6 +5,7 @@ import { queuePhotoDeletion, flushBodyPhotoDeletions } from '../body/body_photo_
 import { supportConfig } from '../support/support_config';
 import { SupportError } from '../support/support_types';
 import {removeDeletedPlannerData} from './planner_data_cleanup';
+import { firebaseAuthentication } from '../../config/firebase';
 
 export async function exportUserData(userId: string) {
     const user = await prisma.user.findUnique({
@@ -80,6 +81,7 @@ export async function deleteUserAccount(userId: string) {
         throw new Error("User not found");
     }
 
+    const identities=await prisma.authIdentity.findMany({where:{userId},select:{firebaseUid:true}});
     await prisma.$transaction(async tx=> {
         const photos=await tx.bodyAssessmentPhoto.findMany({where:{assessment:{userId}}});
         await queuePhotoDeletion(tx,photos);
@@ -93,12 +95,41 @@ export async function deleteUserAccount(userId: string) {
     await flushBodyPhotoDeletions().catch(()=>console.warn('Body photo cleanup will retry.'));
     await removeDeletedPlannerData().catch(()=>console.warn('Planner privacy cleanup will retry.'));
 
+    // Remove the linked Apple/Google sign-in identity from Firebase as well.
+    // The app revokes Sign in with Apple tokens before calling this endpoint.
+    await deleteFirebaseIdentities(identities.map(i=>i.firebaseUid))
+        .catch(()=>console.warn('Firebase identity cleanup was unavailable.'));
+
     try {
-        const keys = await redis.keys(`*${userId}*`);
+        // SCAN instead of KEYS so large keyspaces never block Redis.
+        const keys:string[]=[];
+        let cursor='0';
+        do {
+            const [next,batch]=await redis.scan(cursor,{match:`*${userId}*`,count:500});
+            cursor=String(next); keys.push(...batch.map(String));
+        } while(cursor!=='0');
         await redis.del(...keys, `otp:${user.email}`, `verified:${user.email}`);
     } catch { console.warn('Deleted account cache cleanup was unavailable.'); }
 
     return { success: true, message: "Account deleted." };
+}
+
+async function deleteFirebaseIdentities(uids:string[]) {
+    if(!uids.length) return;
+    const auth=firebaseAuthentication();
+    if(!auth) return;
+    await auth.deleteUsers(uids);
+}
+
+/** Which social providers this account uses (for Apple token revocation). */
+export async function getSignInMethods(userId: string) {
+    const identities=await prisma.authIdentity.findMany({where:{userId},select:{firebaseUid:true}});
+    const auth=identities.length ? firebaseAuthentication() : null;
+    if(!auth) return {apple:false};
+    try {
+        const {users}=await auth.getUsers(identities.map(i=>({uid:i.firebaseUid})));
+        return {apple:users.some(u=>u.providerData.some(p=>p.providerId==='apple.com'))};
+    } catch { return {apple:false}; }
 }
 
 export async function getPrivacyConsent(userId: string) {

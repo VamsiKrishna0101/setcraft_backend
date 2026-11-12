@@ -12,6 +12,7 @@ import {
 } from "./subscription_service";
 import { playPackageName, verifyGoogleNotification } from "./google_play";
 import { verifyAppleNotification } from './apple_store';
+import { linkCreatorPurchase } from './creator_controller';
 
 export function handleSubscription(
   action: (req: Request, res: Response) => Promise<unknown>,
@@ -44,8 +45,9 @@ export const trial = handleSubscription(async (req, res) => {
 });
 
 export const verify = handleSubscription(async (req, res) => {
-  const { purchaseToken } = androidPurchase.parse(req.body);
+  const { purchaseToken, creatorCode } = androidPurchase.parse(req.body);
   const purchase = await savePlayPurchase(req.user!.userId, purchaseToken);
+  if (purchase.active && creatorCode) await linkCreatorPurchase(req.user!.userId, creatorCode);
   res.json({
     data: await getmysubscription(req.user!.userId, false),
     purchaseActive: purchase.active,
@@ -53,8 +55,9 @@ export const verify = handleSubscription(async (req, res) => {
 });
 
 export const verifyIos = handleSubscription(async (req, res) => {
-  const { transactionId, signedTransaction } = iosPurchase.parse(req.body);
+  const { transactionId, signedTransaction, creatorCode } = iosPurchase.parse(req.body);
   const purchase = await saveApplePurchase(req.user!.userId, transactionId, signedTransaction);
+  if (purchase.active && creatorCode) await linkCreatorPurchase(req.user!.userId, creatorCode);
   res.json({ data: await getmysubscription(req.user!.userId, false, 'ios'), purchaseActive: purchase.active });
 });
 

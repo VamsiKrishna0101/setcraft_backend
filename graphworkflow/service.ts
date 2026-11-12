@@ -33,6 +33,17 @@ export async function getPlanAvailability(
     select: { id: true, createdAt: true, weekStart: true, run: {select: {input: true}} },
   });
 
+  // A plan only counts while its week is running or still ahead.
+  const activePlan = await database.weeklyPersonalPlan.findFirst({
+    where: { userId, synthetic: false, status: "ACTIVE" },
+    orderBy: { weekStart: "desc" },
+    select: { weekStart: true, run: { select: { input: true } } },
+  });
+  const activeTimezone = (activePlan?.run.input as unknown as Snapshot | undefined)?.timezone;
+  let today = now.toISOString().slice(0, 10);
+  try { if (activeTimezone) today = dateInZone(activeTimezone, now); } catch {}
+  const hasCurrentPlan = !!activePlan && activePlan.weekStart >= addDays(today, -6);
+
   const pendingRun = await database.weeklyPlanRun.findFirst({
     where: { userId, status: { in: ["QUEUED", "RUNNING"] } },
     orderBy: { createdAt: "desc" },
@@ -61,6 +72,7 @@ export async function getPlanAvailability(
     cooldownActive,
     nextGenerationAt: nextGenerationAt?.toISOString() ?? null,
     lastPlanId: latestPlan?.id ?? null,
+    hasCurrentPlan,
     pendingRun: pendingRun
       ? {
           ...pendingRun,
