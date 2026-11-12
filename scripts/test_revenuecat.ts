@@ -13,6 +13,11 @@ c=fixture(); c.subscriber.entitlements.setcraft_pro.expires_date='2026-11-03T00:
 c.subscriber.entitlements.setcraft_pro.grace_period_expires_date='2026-11-05T00:00:00Z'; assert.equal(revenueCatAccess(c,now).active,true);
 c=fixture(); c.subscriber.entitlements={}; assert.equal(revenueCatAccess(c,now).active,false);
 process.env.NODE_ENV='production'; assert.equal(revenueCatAccess(fixture(),now).active,false);
+// TestFlight / App Review (App Store sandbox) and Play testers must unlock in production.
+c=fixture(); c.subscriber.subscriptions.monthly.store='app_store'; assert.equal(revenueCatAccess(c,now).active,true); assert.equal(revenueCatAccess(c,now).trial,true);
+c=fixture(); c.subscriber.subscriptions.monthly.store='play_store'; assert.equal(revenueCatAccess(c,now).active,true);
+c=fixture(); c.subscriber.subscriptions.monthly.store='app_store'; c.subscriber.subscriptions.monthly.refunded_at=now.toISOString(); assert.equal(revenueCatAccess(c,now).active,false);
+c=fixture(); c.subscriber.subscriptions.monthly.store='app_store'; c.subscriber.entitlements.setcraft_pro.expires_date='2026-11-03T00:00:00Z'; assert.equal(revenueCatAccess(c,now).active,false);
 process.env.REVENUECAT_API_KEY='test_fixture'; assert.equal(revenueCatReady(),false);
 c=fixture(); c.subscriber.subscriptions.monthly.is_sandbox=false; assert.equal(revenueCatAccess(c,now).active,true);
 process.env.REVENUECAT_WEBHOOK_AUTH='test-authorization'; assert.throws(()=>authenticateRevenueCatWebhook()); assert.throws(()=>authenticateRevenueCatWebhook('wrong')); authenticateRevenueCatWebhook('test-authorization');

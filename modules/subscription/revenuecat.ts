@@ -16,6 +16,13 @@ export interface RCCustomer {
   };
 }
 
+// TestFlight, App Review and Play license testers always buy through the real
+// store's sandbox, so production must honour those purchases (Apple guideline:
+// a production server must accept sandbox receipts). RevenueCat's own
+// "test_store" stays limited to non-production sandbox mode.
+const STORE_SANDBOXES = new Set(['app_store', 'mac_app_store', 'play_store']);
+const storeSandbox = (store: string | undefined) => STORE_SANDBOXES.has(String(store || '').toLowerCase());
+
 export function revenueCatAccess(customer: RCCustomer, now = new Date()) {
   const entitlement = customer.subscriber.entitlements[process.env.REVENUECAT_ENTITLEMENT_ID || 'setcraft_pro'];
   const subscription = entitlement && customer.subscriber.subscriptions[entitlement.product_identifier];
@@ -24,7 +31,7 @@ export function revenueCatAccess(customer: RCCustomer, now = new Date()) {
   const active = !!(subscription && expiry && start && Number.isFinite(expiry.getTime()) &&
     Number.isFinite(start.getTime()) && expiry > now && !subscription.refunded_at &&
     typeof subscription.is_sandbox === 'boolean' &&
-    (!subscription.is_sandbox || revenueCatSandbox()));
+    (!subscription.is_sandbox || revenueCatSandbox() || storeSandbox(subscription.store)));
   return { active, end: expiry && Number.isFinite(expiry.getTime()) ? expiry : now,
     start: start && Number.isFinite(start.getTime()) ? start : now,
     trial: active && subscription?.period_type === 'trial',
