@@ -1,0 +1,89 @@
+name: Deploy Setcraft Backend Multi-Region to Google Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GAR_LOCATION: us-central1
+  REPOSITORY: setcraft
+  SERVICE_NAME: setcraft-backend
+  # Deploying to 3 strategic regions covering USA/Canada, Europe, and Australia
+  REGIONS: "us-central1 europe-west1 australia-southeast1"
+
+jobs:
+  deploy:
+    name: Build & Global Multi-Region Deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Google Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev --quiet
+
+      - name: Inject Firebase Admin Secret
+        run: |
+          mkdir -p secrets
+          echo '${{ secrets.FIREBASE_ADMIN_JSON }}' > secrets/firebase-admin.json
+
+      - name: Build & Push Production Container Image
+        id: build-image
+        run: |
+          IMAGE_TAG="${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
+          LATEST_TAG="${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:latest"
+          
+          echo "Building lightweight production image (Node 22, Zero Python)..."
+          docker build -t "$IMAGE_TAG" -t "$LATEST_TAG" -f Dockerfile .
+          
+          echo "Pushing image to Google Artifact Registry..."
+          docker push "$IMAGE_TAG"
+          docker push "$LATEST_TAG"
+          
+          echo "image=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to All Target Regions (USA/Canada, Europe, Australia)
+        run: |
+          IMAGE="${{ steps.build-image.outputs.image }}"
+          for REGION in ${{ env.REGIONS }}; do
+            echo "=========================================================="
+            echo "Deploying to region: $REGION"
+            echo "=========================================================="
+            gcloud run deploy "${{ env.SERVICE_NAME }}" \
+              --image "$IMAGE" \
+              --region "$REGION" \
+              --platform managed \
+              --allow-unauthenticated \
+              --port 8000 \
+              --min-instances 0 \
+              --max-instances 30 \
+              --cpu 1 \
+              --memory 1Gi \
+              --timeout 120s \
+              --concurrency 80 \
+              --update-env-vars "NODE_ENV=production,SOCIAL_AUTH_ENABLED=true,PRIVACY_POLICY_URL=https://sites.google.com/view/setcraft-legal,SUBSCRIPTION_PRIVACY_URL=https://sites.google.com/view/setcraft-legal,TERMS_URL=https://sites.google.com/view/setcraft-legal/terms-of-use,SUBSCRIPTION_TERMS_URL=https://sites.google.com/view/setcraft-legal/terms-of-use,SUPPORT_EMAIL=support@setcraft.fit" \
+              --quiet
+          done
+
+      - name: Deployment Summary
+        run: |
+          echo "### 🚀 Setcraft Multi-Region Deployment Completed!" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: \`${{ steps.build-image.outputs.image }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Regions Deployed**: \`${{ env.REGIONS }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Production API Domain**: \`https://api.setcraft.fit\`" >> $GITHUB_STEP_SUMMARY
