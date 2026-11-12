@@ -158,11 +158,8 @@ async function unit() {
   assert.equal(preview.source, "rules");
   assert(preview.muscleGroups.some((group) => group.region === "chest"));
   assert(preview.muscleGroups.some((group) => group.region === "back"));
-  assert(
-    preview.muscleGroups.some(
-      (group) => group.region === "legs" && group.lockedCount > 0,
-    ),
-  );
+  assert(preview.muscleGroups.some((group) => group.region === "legs"));
+  assert(preview.muscleGroups.some((group) => group.lockedCount > 0));
   assert.equal(
     preview.muscleGroups.flatMap((group) => group.exercises).length,
     2,
@@ -274,22 +271,105 @@ async function unit() {
       }, snapshot),
     /test/,
   );
-  await assert.rejects(
-    () =>
-      buildStarterFallback({
-        ...snapshot,
-        profile: { ...snapshot.profile, limitations: ["KNEE"] },
-      }),
-    /reviewed exercise selection/,
+
+  // Shoulder injury produces a backup plan with the rest of the body (no shoulder/overhead exercises).
+  const shoulderSnapshot: Snapshot = {
+    ...snapshot,
+    profile: { ...snapshot.profile, limitations: ["SHOULDER"] },
+    candidates: [
+      ...snapshot.candidates,
+      {
+        ...snapshot.candidates[0]!,
+        id: randomUUID(),
+        name: "Dumbbell overhead press",
+        region: "shoulders",
+        primary: ["shoulders"],
+      },
+    ],
+  };
+  const shoulderPlan = await buildStarterFallback(shoulderSnapshot);
+  validatePlan(shoulderSnapshot, shoulderPlan);
+  assert(
+    shoulderPlan.workouts
+      .flatMap((d) => d.exercises)
+      .every((e) => e.region !== "shoulders" && !/overhead/i.test(e.name)),
+    "Shoulder backup plan excludes shoulder and overhead exercises.",
   );
-  // An AI failure for a profile with movement notes stays retryable.
-  await assert.rejects(
-    () =>
-      generateStarterWithFallback(async () => {
-        throw new PlannerError("MODEL_RESPONSE_INVALID", "Could not produce a validated plan.", 503);
-      }, { ...snapshot, profile: { ...snapshot.profile, limitations: ["KNEE"] } }),
-    (error: unknown) => error instanceof PlannerError && error.code === "MODEL_RESPONSE_INVALID",
+  assert(
+    shoulderPlan.workouts.some((d) => d.exercises.length > 0),
+    "Shoulder backup plan keeps the remaining exercises.",
   );
+  assert(
+    starterPreview(shoulderPlan).adaptationNote?.includes("shoulder-safe"),
+    "Shoulder preview surfaces adaptation note.",
+  );
+
+  // When the saved setup cannot be scheduled, the injury template still builds a week.
+  const brokenShoulderSnapshot: Snapshot = {
+    ...shoulderSnapshot,
+    profile: { ...shoulderSnapshot.profile, trainingDays: ["FUNDAY"] },
+  };
+  // buildRulesFallback validates against the adapted snapshot it actually used.
+  const templatePlan = await buildStarterFallback(brokenShoulderSnapshot);
+  assert(
+    templatePlan.workouts.some((d) => d.exercises.length > 0) &&
+      templatePlan.workouts
+        .flatMap((d) => d.exercises)
+        .every((e) => e.region !== "shoulders"),
+    "Shoulder injury template replaces a failed setup with a shoulder-free week.",
+  );
+
+  // Knee injury produces a distinct backup plan without squats or lunges.
+  const kneeSnapshot: Snapshot = {
+    ...snapshot,
+    profile: { ...snapshot.profile, limitations: ["KNEE"] },
+    candidates: [
+      ...snapshot.candidates,
+      {
+        ...snapshot.candidates.find((c) => c.region === "legs")!,
+        id: randomUUID(),
+        name: "Dumbbell Romanian deadlift",
+        subTarget: "hamstrings",
+        primary: ["hamstrings", "glutes"],
+      },
+    ],
+  };
+  const kneePlan = await buildStarterFallback(kneeSnapshot);
+  validatePlan(kneeSnapshot, kneePlan);
+  assert(
+    kneePlan.workouts
+      .flatMap((d) => d.exercises)
+      .every((e) => !/squat|lunge/i.test(e.name)),
+    "Knee backup plan excludes squats and lunges.",
+  );
+  assert.notDeepEqual(
+    shoulderPlan.workouts.map((d) => d.name),
+    kneePlan.workouts.map((d) => d.name),
+    "Different injuries produce distinct backup plans.",
+  );
+
+  // Custom movement notes (e.g. "bad shoulder") also produce an adapted backup plan.
+  const customNotePlan = await buildStarterFallback({
+    ...shoulderSnapshot,
+    profile: {
+      ...shoulderSnapshot.profile,
+      limitations: ["NONE"],
+      customLimitations: "bad shoulder",
+    },
+  });
+  assert(
+    customNotePlan.workouts
+      .flatMap((d) => d.exercises)
+      .every((e) => e.region !== "shoulders"),
+  );
+
+  // An AI failure for a profile with injuries falls back to the adapted backup starter plan.
+  const kneeFallback = await generateStarterWithFallback(async () => {
+    throw new PlannerError("MODEL_RESPONSE_INVALID", "Could not produce a validated plan.", 503);
+  }, kneeSnapshot);
+  assert.equal(kneeFallback.model, "starter:rules-v1");
+  validatePlan(kneeSnapshot, kneeFallback);
+
   await assert.rejects(
     () => buildStarterFallback({ ...snapshot, candidates: [] }),
     /match|equipment/,

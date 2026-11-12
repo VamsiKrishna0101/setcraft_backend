@@ -77,7 +77,7 @@ jobs:
               --memory 1Gi \
               --timeout 120s \
               --concurrency 80 \
-              --update-env-vars "NODE_ENV=production,SOCIAL_AUTH_ENABLED=true,PRIVACY_POLICY_URL=https://sites.google.com/view/setcraft-legal,SUBSCRIPTION_PRIVACY_URL=https://sites.google.com/view/setcraft-legal,TERMS_URL=https://sites.google.com/view/setcraft-legal/terms-of-use,SUBSCRIPTION_TERMS_URL=https://sites.google.com/view/setcraft-legal/terms-of-use,SUPPORT_EMAIL=support@setcraft.fit" \
+              --update-env-vars "NODE_ENV=production,SOCIAL_AUTH_ENABLED=true,PRIVACY_POLICY_URL=https://sites.google.com/view/setcraft-legal,SUBSCRIPTION_PRIVACY_URL=https://sites.google.com/view/setcraft-legal,TERMS_URL=https://sites.google.com/view/setcraft-legal/terms-of-use,SUBSCRIPTION_TERMS_URL=https://sites.google.com/view/setcraft-legal/terms-of-use,SUPPORT_EMAIL=support@setcraft.fit,NOTIFICATION_IMAGE_URL=https://api.setcraft.fit/branding/mochi-coach-v1.png" \
               --quiet
           done
 

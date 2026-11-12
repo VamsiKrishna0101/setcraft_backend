@@ -6,6 +6,7 @@ import { firebaseMessaging } from '../../config/firebase';
 import { realMealWhere } from '../../utils/real_data';
 import { getmysubscription } from '../subscription/subscription_service';
 import { getPlanAvailability } from '../../graphworkflow/service';
+import { mochiNotificationImageUrl } from '../../utils/email_branding';
 import {
   localTime, notificationDevice, notificationPreferences, quietHours,
   effectiveReminder, previousDate, minutes, notificationCategory, notificationPriority,
@@ -236,6 +237,9 @@ export async function deliverNotification(job: NotificationJob, messaging = fire
   const retry: string[] = [];
   let successes = 0;
   let errorCode: string | null = null;
+  // Mochi, the AI coach, appears on every alert except billing notices.
+  const showMochi = category !== 'billing';
+  const mochi = showMochi ? mochiNotificationImageUrl() : null;
   try {
     const result = await messaging.sendEachForMulticast({
       tokens: devices.map(device => device.token),
@@ -253,11 +257,13 @@ export async function deliverNotification(job: NotificationJob, messaging = fire
         notification: {
           channelId: category === 'billing' ? 'setcraft_account' : job.type === 'SUMMARY' ? 'setcraft_insights' : 'fitai_reminders',
           icon: 'ic_notification', tag: job.id,
+          ...(mochi ? { imageUrl: mochi } : {}),
         },
       },
       apns: {
         headers: { 'apns-collapse-id': job.id, 'apns-expiration': String(Math.floor(job.expiresAt.getTime() / 1000)) },
-        payload: { aps: { sound: 'default' } },
+        // mutable-content lets SetcraftNotificationService attach Mochi on iPhone.
+        payload: { aps: { sound: 'default', 'mutable-content': 1 }, ...(showMochi ? { coach: 'mochi' } : {}) },
       },
     });
     for (let index = 0; index < result.responses.length; index++) {

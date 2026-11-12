@@ -18,6 +18,19 @@ export function explicitExcludedMuscles(profile: Profile) {
   return excluded;
 }
 
+export function activeLimitations(profile: Profile): Set<string> {
+  const active = new Set(
+    profile.limitations.filter((value) => value !== "NONE" && value !== "OTHER"),
+  );
+  const notes = profile.customLimitations ?? "";
+  if (/\bshoulders?\b/i.test(notes)) active.add("SHOULDER");
+  if (/\bknees?\b/i.test(notes)) active.add("KNEE");
+  if (/\b(?:lower\s+)?back\b|\bspine\b|\blumbar\b/i.test(notes)) active.add("BACK");
+  if (/\bwrists?\b/i.test(notes)) active.add("WRIST");
+  if (/\bhips?\b/i.test(notes)) active.add("HIP");
+  return active;
+}
+
 // Conservative selection constraints, not a claim that every remaining exercise
 // is appropriate for a particular injury. Apply to selections AND alternatives.
 export function exerciseAllowedByLimitations(candidate: Candidate, profile: Profile) {
@@ -25,10 +38,23 @@ export function exerciseAllowedByLimitations(candidate: Candidate, profile: Prof
   if ([...candidate.primary, ...candidate.secondary].some(muscle => excluded.has(muscle))) return false;
   const name = candidate.name.toLowerCase();
   const demands = (candidate.movementDemands ?? []).join(" ").toLowerCase();
-  for (const limitation of profile.limitations) {
-    if (limitation === "SHOULDER" && (/overhead|military|behind.*neck|\bdip\b/.test(name) || /overhead|deep shoulder extension/.test(demands))) return false;
+  for (const limitation of activeLimitations(profile)) {
+    if (
+      limitation === "SHOULDER" &&
+      (candidate.region === "shoulders" ||
+        candidate.primary.includes("shoulders") ||
+        /overhead|military|behind.*neck|\bdip\b/.test(name) ||
+        /overhead|deep shoulder extension/.test(demands))
+    )
+      return false;
     if (limitation === "KNEE" && (/squat|lunge|jump|step.?up/.test(name) || /deep knee flexion|high impact/.test(demands))) return false;
-    if (limitation === "BACK" && (/deadlift|good morning|bent.?over.*row/.test(name) || /heavy spinal loading/.test(demands))) return false;
+    if (
+      limitation === "BACK" &&
+      (candidate.primary.includes("lower_back") ||
+        /deadlift|good morning|bent.?over.*row|back extension|superman/.test(name) ||
+        /heavy spinal loading/.test(demands))
+    )
+      return false;
     if (limitation === "WRIST" && (/barbell.*curl|straight.*bar|\bclean\b/.test(name) || /loaded wrist extension/.test(demands))) return false;
     if (limitation === "HIP" && (/sumo|wide.*squat|hip thrust/.test(name) || /deep hip flexion/.test(demands))) return false;
   }

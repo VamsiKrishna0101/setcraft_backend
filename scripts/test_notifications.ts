@@ -55,9 +55,18 @@ async function main() {
   let responseCodes: (string | null)[] = [];
   let lastTokens: string[] = [];
   const transport = {
-    sendEachForMulticast: async (message: { tokens: string[]; data: Record<string, string> }) => {
+    sendEachForMulticast: async (message: {
+      tokens: string[]; data: Record<string, string>;
+      apns?: { payload?: { aps?: Record<string, unknown>; coach?: string } };
+      android?: { notification?: { imageUrl?: string } };
+    }) => {
       sends++;
       lastTokens = message.tokens;
+      // Mochi: iPhone extension trigger always; Android picture when a public origin exists.
+      assert.equal(message.apns?.payload?.aps?.['mutable-content'], 1);
+      assert.equal(message.apns?.payload?.coach, 'mochi');
+      const image = message.android?.notification?.imageUrl;
+      assert(image === undefined || /^https:\/\/.+\/branding\/mochi-coach-v1\.png$/.test(image));
       assert.equal(message.data.userId, first.id);
       assert.equal('sleepMinutes' in message.data, false);
       return {

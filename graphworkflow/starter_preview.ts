@@ -39,9 +39,13 @@ export function starterPreview(plan: WeeklyPlan) {
     repsMin: exercise.repsMin,
     repsMax: exercise.repsMax,
   });
+  const adaptationNote = plan.warnings.find((warning) =>
+    warning.startsWith("Adapted "),
+  );
   return {
     source: plan.model === "starter:rules-v1" ? "rules" : "ai",
     weekStart: plan.weekStart,
+    ...(adaptationNote ? { adaptationNote } : {}),
     muscleGroups: groups.map((group) => ({
       region: group.region,
       exerciseCount: group.exercises.length,

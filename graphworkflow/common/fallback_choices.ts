@@ -6,6 +6,7 @@ import {
   PlannerError,
 } from "./types";
 import { movementOf, rankedCandidates } from "./coaching";
+import { activeLimitations } from "./constraints";
 import { exerciseRules } from "./loading";
 import { regionRecovery, regionSetBudget, loadGuide } from "./region_input";
 import { prescriptionSeconds } from "./session_quality";
@@ -26,14 +27,30 @@ export function fallbackChoices(
       422,
     );
   const recovery = regionRecovery(snapshot, region).reducedRecovery;
+  const limitations = activeLimitations(snapshot.profile);
+  const limitationNote = limitations.has("SHOULDER")
+    ? " Chosen to avoid shoulder and overhead strain while training the rest of your body."
+    : limitations.has("KNEE")
+      ? " Chosen to limit deep knee stress."
+      : limitations.has("BACK")
+        ? " Chosen to avoid heavy spinal loading."
+        : limitations.has("WRIST")
+          ? " Chosen for gentler wrist positioning."
+          : limitations.has("HIP")
+            ? " Chosen to reduce deep hip flexion."
+            : "";
   let budget = regionSetBudget(snapshot, region, days.length);
   return {
     days: days.map((day, index) => {
       const patterns =
         region === "legs"
-          ? ["knee_dominant", "hip_dominant"]
+          ? limitations.has("KNEE")
+            ? ["hip_dominant", "knee_flexion", "calves"]
+            : ["knee_dominant", "hip_dominant"]
           : region === "back"
-            ? ["horizontal_pull", "vertical_pull"]
+            ? limitations.has("BACK")
+              ? ["vertical_pull", "horizontal_pull"]
+              : ["horizontal_pull", "vertical_pull"]
             : [];
       const preferred = patterns[index % patterns.length];
       const ranked = [...pool].sort(
@@ -113,7 +130,7 @@ export function fallbackChoices(
           weightKg: load.suggestedKg,
           targetRpe: Math.min(7, rules.maxTargetRpe),
           restSeconds: rest,
-          reason: `${load.hasHistory ? "Retained a recorded movement" : "A manageable starting movement"} for your ${snapshot.profile.location === "HOME" ? "home equipment" : "available equipment"} and ${snapshot.profile.minutes}-minute session.`,
+          reason: `${load.hasHistory ? "Retained a recorded movement" : "A manageable starting movement"} for your ${snapshot.profile.location === "HOME" ? "home equipment" : "available equipment"} and ${snapshot.profile.minutes}-minute session.${limitationNote}`,
           progression: load.note,
         });
         usedPatterns.add(pattern);
