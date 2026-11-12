@@ -22,6 +22,7 @@
     "test:body": "tsx scripts/test_body_assessments.ts",
     "test:notifications": "node --use-system-ca --import tsx scripts/test_notifications.ts",
     "test:subscription": "node --use-system-ca --import tsx scripts/test_subscription.ts",
+    "test:trial-reminder": "node --use-system-ca --import tsx scripts/test_trial_reminder_email.ts",
     "test:body:flow": "tsx scripts/test_body_estimate_flow.ts",
     "test:body:physique": "node --use-system-ca --import tsx scripts/test_physique_review.ts",
     "test:body:planned": "node --use-system-ca --import tsx scripts/test_planned_physique.ts",

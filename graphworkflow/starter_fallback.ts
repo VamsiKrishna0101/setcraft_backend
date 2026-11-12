@@ -132,6 +132,18 @@ export async function generateStarterWithFallback(
       !(error instanceof PlannerError && error.code === "PLAN_QUALITY")
     )
       throw error;
-    return buildStarterFallback(snapshot, report);
+    try {
+      return await buildStarterFallback(snapshot, report);
+    } catch (fallbackError) {
+      // Profiles with injuries or movement notes need AI-reviewed exercise
+      // selection. Surface the original, retryable AI failure instead of a
+      // dead-end "review your notes" message the user cannot act on.
+      if (
+        fallbackError instanceof PlannerError &&
+        fallbackError.code === "STARTER_REVIEW_REQUIRED"
+      )
+        throw error;
+      throw fallbackError;
+    }
   }
 }

@@ -282,6 +282,14 @@ async function unit() {
       }),
     /reviewed exercise selection/,
   );
+  // An AI failure for a profile with movement notes stays retryable.
+  await assert.rejects(
+    () =>
+      generateStarterWithFallback(async () => {
+        throw new PlannerError("MODEL_RESPONSE_INVALID", "Could not produce a validated plan.", 503);
+      }, { ...snapshot, profile: { ...snapshot.profile, limitations: ["KNEE"] } }),
+    (error: unknown) => error instanceof PlannerError && error.code === "MODEL_RESPONSE_INVALID",
+  );
   await assert.rejects(
     () => buildStarterFallback({ ...snapshot, candidates: [] }),
     /match|equipment/,

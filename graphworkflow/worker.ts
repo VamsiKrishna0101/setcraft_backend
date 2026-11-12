@@ -125,7 +125,15 @@ export async function processNextPlan() {
 
     const graph = buildWeeklyGraph({
       ...(snapshot.onboardingStarter
-        ? { model: createStructuredModel(120000, 1) }
+        ? {
+            // Two attempts: the second gets repair feedback for a malformed
+            // response. Failures are logged so starter issues are diagnosable.
+            model: createStructuredModel(120000, 2, (failure) =>
+              console.warn(
+                JSON.stringify({ event: "starter_model_failure", runId: run.id, ...failure }),
+              ),
+            ),
+          }
         : {}),
       checkpointer: snapshot.onboardingStarter ? undefined : checkpointer,
       stage: (stage, completedStep) =>

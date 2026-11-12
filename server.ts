@@ -32,6 +32,7 @@ import plannerRoutes from "./graphworkflow/routes";
 import { startPlannerWorker } from "./graphworkflow/worker";
 import notificationRoutes from "./modules/notifications/notifications_routes";
 import { startNotificationsWorker } from "./modules/notifications/notifications_scheduler";
+import { startTrialReminderEmailWorker } from "./modules/subscription/trial_reminder_email";
 import subscriptionRoutes from "./modules/subscription/subscription_routes";
 import { rateLimit, trustedProxies } from "./middleware/rate_limit";
 import { mcpRoutes, mcpTokenRoutes } from './modules/mcp/mcp_routes';
@@ -128,6 +129,7 @@ app.listen(PORT, () => {
   // A second server that cannot bind the port must not run background jobs.
   startPlannerWorker();
   startNotificationsWorker();
+  startTrialReminderEmailWorker();
   const cleanupMcp = () => {
     void pruneMcpHistory().catch((err) =>
       console.warn("MCP history cleanup will retry:", err?.message || err),
