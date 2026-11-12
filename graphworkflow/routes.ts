@@ -6,6 +6,7 @@ import { authenticateStrict } from "../middleware/auth";
 import { rateLimit } from "../middleware/rate_limit";
 import { requirePremium } from "../modules/subscription/subscription_service";
 import prisma from '../config/prisma';
+import { processNextPlan } from "./worker";
 import { generateInput, PlannerError } from "./common/types";
 import {
   assertStarterReady,
@@ -144,15 +145,43 @@ router.post(
     });
   }),
 );
+// Cloud Run only gives this service CPU while a request is open. Holding the
+// status poll open (up to RUN_POLL_HOLD_MS) while a plan is being generated
+// keeps CPU allocated for the worker on this instance, so generation and its
+// database connections are not starved between the app's 3-second polls.
+const RUN_POLL_HOLD_MS = 15000;
+const RUN_POLL_STEP_MS = 1500;
 router.get(
   "/runs/:id",
   handleRequest(async (request, response) => {
-    response.json({
-      data: await getRun(
-        request.user!.userId,
-        z.uuid().parse(request.params.id),
-      ),
-    });
+    const userId = request.user!.userId;
+    const id = z.uuid().parse(request.params.id);
+    const deadline = Date.now() + RUN_POLL_HOLD_MS;
+    const peek = () =>
+      prisma.weeklyPlanRun.findFirst({
+        where: { id, userId },
+        select: { status: true, updatedAt: true },
+      });
+    const first = await peek();
+    let current = first;
+    while (
+      current &&
+      (current.status === "QUEUED" || current.status === "RUNNING") &&
+      Date.now() + RUN_POLL_STEP_MS < deadline &&
+      !request.socket.destroyed
+    ) {
+      // Pick the run up here, where CPU is currently allocated.
+      if (current.status === "QUEUED") void processNextPlan();
+      await new Promise((resolve) => setTimeout(resolve, RUN_POLL_STEP_MS));
+      current = await peek();
+      if (
+        !current ||
+        current.status !== first!.status ||
+        current.updatedAt.getTime() !== first!.updatedAt.getTime()
+      )
+        break;
+    }
+    response.json({ data: await getRun(userId, id) });
   }),
 );
 router.post(
