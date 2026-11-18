@@ -328,6 +328,31 @@ export function regionSetBudget(
   );
 }
 
+export const SHORTLIST_SIZE = 12;
+
+/**
+ * The best-ranked options the coach chooses from: every movement pattern keeps
+ * its top picks before the remainder fills by rank, so coverage rules stay
+ * satisfiable while the model never sees hundreds of odd catalogue variants.
+ */
+export function shortlist(snapshot: Snapshot, region: Region) {
+  const ranked = rankedCandidates(snapshot, region);
+  const chosen = new Set<string>();
+  // Pass 1: best of every pattern. Pass 2: up to three per pattern. Pass 3: by rank.
+  for (const limit of [1, 3, Infinity]) {
+    const perPattern = new Map<string, number>();
+    for (const candidate of ranked) {
+      const pattern = movementOf(candidate);
+      const count = perPattern.get(pattern) ?? 0;
+      if (count >= limit) continue;
+      perPattern.set(pattern, count + 1);
+      if (chosen.size >= SHORTLIST_SIZE && limit > 1) break;
+      chosen.add(candidate.id);
+    }
+  }
+  return ranked.filter((candidate) => chosen.has(candidate.id));
+}
+
 // Region-specific history, optional entered measurements and eligible exercises.
 export function buildRegionInput(
   snapshot: Snapshot,
@@ -338,7 +363,7 @@ export function buildRegionInput(
   const recovery = regionRecovery(snapshot, region);
   const currentWeight = profile.weight;
 
-  const exercises = rankedCandidates(snapshot, region).map((candidate) => {
+  const exercises = shortlist(snapshot, region).map((candidate) => {
     const guide = loadGuide(snapshot, candidate, recovery.reducedRecovery);
     const rules = exerciseRules(snapshot, candidate, recovery.reducedRecovery);
 

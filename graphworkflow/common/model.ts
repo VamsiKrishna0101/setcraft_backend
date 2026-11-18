@@ -133,12 +133,18 @@ export const createStructuredModel = (
 
         return value;
       } catch (error) {
-        const status = (error as { status?: number })?.status;
-        const providerCode = (error as { code?: string })?.code;
         const isContractError =
           error instanceof PlannerError ||
           error instanceof z.ZodError ||
           error instanceof SyntaxError;
+        // A validation PlannerError carries its own 400; only provider errors
+        // have an HTTP status. Contract errors get repair feedback and a retry.
+        const status = isContractError
+          ? undefined
+          : (error as { status?: number })?.status;
+        const providerCode = isContractError
+          ? undefined
+          : (error as { code?: string })?.code;
         onFailure?.({
           model: selectedModel,
           attempt: attempt + 1,
