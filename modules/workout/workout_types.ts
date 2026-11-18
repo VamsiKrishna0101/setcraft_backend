@@ -19,7 +19,8 @@ export const ExerciseSchema = z.object({
 export type ExerciseInput = z.infer<typeof ExerciseSchema>;
 
 export const AddWorkoutItemSchema = z.object({
-    userWorkoutId: z.string().uuid().optional(),
+    // Apps send null when there is no plan for today yet.
+    userWorkoutId: z.string().uuid().nullish(),
     dayOfWeek: z.enum(DayOfWeek),
     workoutId: z.string().uuid().optional(),
     customExercise: z.object({

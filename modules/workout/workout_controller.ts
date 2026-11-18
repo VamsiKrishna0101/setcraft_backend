@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { DayOfWeek } from "@prisma/client";
-import { getPlanForDate } from './session/session_service';
+import { addSessionItem, getPlanForDate } from './session/session_service';
+import redis from '../../config/redis';
 import { dateSchema, weekday } from './session/session_types';
 import { appLocale } from '../../utils/app_locale';
 import { localizedExercise, localizedCoaching } from '../../utils/fitness_locale';
@@ -17,7 +18,8 @@ import {
     markItemComplete,
     markItemSkip,
     updateWorkoutItem,
-    addWorkoutItem,
+    resolveAddedExercise,
+    localDateForWeekday,
     deleteWorkoutItem,
     markWorkoutComplete,
     logSet,
@@ -180,8 +182,19 @@ export async function handleAddWorkoutItem(req: Request, res: Response, next: Ne
         return;
     }
     try {
-        const data = await addWorkoutItem(userId, parsed.data);
-        res.status(201).json({ message: "Exercise added to today's plan", data: { ...data, workout: localizedExercise(data.workout, appLocale(req.headers['accept-language'])) } });
+        // Same path as the Train tab: it adds to a started session, a dated
+        // plan or a new plan for today, and refuses a finished workout.
+        const input = parsed.data;
+        const workoutId = await resolveAddedExercise(input);
+        await addSessionItem(userId, localDateForWeekday(input.dayOfWeek), {
+            workoutId,
+            targetSets: input.targetSets,
+            targetReps: input.targetReps,
+            targetWeight: input.targetWeight ?? 0,
+            restSeconds: input.restSeconds,
+        });
+        await redis.del(`home:${userId}`).catch(() => null);
+        res.status(201).json({ message: "Exercise added to today's plan", data: { workoutId } });
     } catch (e) {
         next(e);
     }

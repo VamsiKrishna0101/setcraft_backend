@@ -346,46 +346,12 @@ export async function updateWorkoutItem(userId: string, itemId: string, input: U
     return updated;
 }
 
-export async function addWorkoutItem(userId: string, input: AddWorkoutItemInput) {
-    const candidate = input.workoutId
-        ? await prisma.workout.findUnique({where:{id:input.workoutId},select:{coachingMetadata:true,catalogStatus:true}})
-        : input.customExercise
-            ? await prisma.workout.findUnique({where:{name:input.customExercise.name},select:{coachingMetadata:true,catalogStatus:true}})
-            : null;
-    if (input.workoutId && !candidate) throw new Error('Exercise not found.');
-    if (candidate?.catalogStatus==='STAGED') throw new Error('This exercise is awaiting review.');
-    const modality = (candidate?.coachingMetadata as {exerciseType?:string}|null)?.exerciseType;
-    if (modality && !['weight_reps','bodyweight_reps'].includes(modality)) {
-        throw new Error('This exercise uses time, distance, or assistance rather than standard load-and-repetition logging.');
-    }
-    let userWorkoutId = input.userWorkoutId;
-    if (userWorkoutId) {
-        // Once today's workout is started, the app's plan id is the session snapshot; add there.
-        const plan = await prisma.userWorkout.findFirst({ where: { id: userWorkoutId, userId }, select: { session: { select: { status: true } } } });
-        if (!plan) throw new Error("Workout not found");
-        if (plan.session?.status === "COMPLETED") throw new Error("This workout is already finished.");
-    }
-    if (!userWorkoutId) {
-        const existing = await prisma.userWorkout.findFirst({
-            where: { userId, session: null, status: { notIn: ["COMPLETED", "SKIPPED"] } },
-            orderBy: { createdAt: "desc" },
-            select: { id: true },
-        });
-        if (existing) {
-            userWorkoutId = existing.id;
-        } else {
-            const created = await prisma.userWorkout.create({
-                data: {
-                    userId,
-                    weekLabel: "Custom Plan",
-                    status: "IN_PROGRESS",
-                },
-                select: { id: true },
-            });
-            userWorkoutId = created.id;
-        }
-    }
-
+/**
+ * The exercise a legacy "add to today" request refers to: a catalogue id, or a
+ * custom exercise created (or reused by name) on first use. Where it lands is
+ * decided by the date-based session service, like the Train tab.
+ */
+export async function resolveAddedExercise(input: AddWorkoutItemInput) {
     let workoutId = input.workoutId;
     if (!workoutId && input.customExercise) {
         const custom = input.customExercise;
@@ -418,42 +384,20 @@ export async function addWorkoutItem(userId: string, input: AddWorkoutItemInput)
     }
 
     if (!workoutId) throw new Error("Either workoutId or customExercise must be provided");
-
-    const lastItem = await prisma.userWorkoutItem.findFirst({
-        where: { userWorkoutId, dayOfWeek: input.dayOfWeek },
-        orderBy: { orderIndex: "desc" },
-        select: { orderIndex: true },
-    });
-    const nextIndex = (lastItem?.orderIndex ?? -1) + 1;
-
-    const newItem = await prisma.userWorkoutItem.create({
-        data: {
-            userWorkoutId,
-            workoutId,
-            dayOfWeek: input.dayOfWeek,
-            orderIndex: nextIndex,
-            targetSets: input.targetSets,
-            targetReps: input.targetReps,
-            targetWeight: input.targetWeight ?? 0,
-            targetRpe: input.targetRpe ?? 8.0,
-            restSeconds: input.restSeconds,
-            status: "NOT_STARTED",
-        },
-        select: {
-            id: true, dayOfWeek: true, orderIndex: true,
-            targetSets: true, targetReps: true, targetWeight: true, setTargets: true, targetRpe: true,
-            restSeconds: true, status: true, completedAt: true,
-            workout: { select: exerciseSelect },
-        },
-    });
-
-    await invalidateUserWorkoutCache(userId);
-    await redis.del(`home:${userId}`);
-    return {
-        ...newItem,
-        workout: newItem.workout ? formatExercise(newItem.workout) : newItem.workout,
-    };
+    return workoutId;
 }
+
+/** The client's local date for its "today" weekday: today, yesterday or tomorrow in UTC. */
+export function localDateForWeekday(dayOfWeek: DayOfWeek, now = Date.now()) {
+    for (const offset of [0, -1, 1]) {
+        const date = new Date(now + offset * 86_400_000).toISOString().slice(0, 10);
+        if (weekdayOf(date) === dayOfWeek) return date;
+    }
+    throw new Error("Invalid day.");
+}
+
+const weekdayOf = (date: string) =>
+    ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'][new Date(`${date}T12:00:00Z`).getUTCDay()];
 
 export async function deleteWorkoutItem(userId: string, itemId: string) {
     const item = await prisma.userWorkoutItem.findFirst({
