@@ -49,6 +49,8 @@ export function exerciseEligible(snapshot: Snapshot, candidate: Candidate) {
   if (!exerciseAllowedByLimitations(candidate, snapshot.profile)) return false;
   const familiar = familiarDates(snapshot, candidate).length >= 2;
   if (HIGH_SKILL.test(candidate.name) && !familiar) return false;
+  if (snapshot.profile.experience === "INTERMEDIATE")
+    return familiar || !/advanced|expert/i.test(candidate.difficulty ?? "");
   if (snapshot.profile.experience !== "BEGINNER") return true;
   // A small reviewed allowlist corrects imported equipment-based INTERMEDIATE
   // labels without letting every intermediate variation into a beginner plan.
@@ -100,9 +102,38 @@ export function movementOf(candidate: Candidate): string {
   }
 }
 
+// Well-known gym staples per region, matched against the plain catalogue name.
+const STAPLES: Record<Region, RegExp> = {
+  chest:
+    /^(barbell|dumbbell|smith) (incline )?bench press$|^(lever|machine) (seated |incline )?chest press$|^push-?up$|^(dumbbell|cable) (incline )?fly$|^cable (standing|middle|seated chest) fly$|^pec deck|^lever seated fly$/,
+  back: /^pull-?up$|^chin-?up$|lat(eral)? pull-?down|^(cable|lever) seated row$|^cable (low|rope) seated row$|^(barbell|dumbbell) bent over row$|^dumbbell (one|single) arm row$|^t-?bar row/,
+  legs: /^barbell (full |back |front )?squat$|^dumbbell goblet squat$|^(barbell|dumbbell) romanian deadlift$|^sled 45.?degrees? leg press$|^(lever|smith) (seated )?leg press$|^lever leg extension$|^lever (lying|seated) leg curl$|^(barbell|dumbbell) (walking |rear )?lunge$|^dumbbell (goblet )?(bulgarian )?split squat$|^barbell hip thrust$|^(barbell|lever|dumbbell) (standing |seated )?calf raise$/,
+  shoulders:
+    /^dumbbell (seated )?shoulder press$|^barbell (seated )?(overhead|military) press$|^(lever|smith) (seated )?shoulder press$|^(dumbbell|cable) lateral raise$|^cable (rope )?face pull$|^dumbbell rear (delt|lateral) (raise|fly)$|^lever (seated )?reverse fly$/,
+  biceps:
+    /^(barbell|dumbbell|ez barbell|cable) curl$|^(dumbbell|cable) hammer curl$|^(barbell|dumbbell|ez barbell|lever) preacher curl$|^dumbbell incline curl$/,
+  triceps:
+    /^cable (triceps |tricep )?pushdown( \(with rope attachment\))?$|^cable (rope )?overhead triceps extension$|^dumbbell (seated |standing )?(overhead )?triceps extension$|^(barbell|ez barbell) lying triceps extension$|skull ?crusher$|^(barbell )?close.?grip bench press$|^bench dip$/,
+  core: /^dead bug$|^(cable |dumbbell )?crunch$|^cable kneeling crunch$|^hanging (knee|leg) raise$|^(cable|band) horizontal pallof press$|^ab wheel|^lying leg raise$|^decline crunch$/,
+};
+
+// The main lift of each pattern outranks its accessory cousins.
+const PRIMARY =
+  /bench press$|^barbell (full |back )?squat$|leg press$|romanian deadlift$|lat(eral)? pull-?down|^pull-?up$|seated row$|bent over row$|shoulder press$|lateral raise$|^(barbell|dumbbell|cable) curl$|pushdown$|^dead bug$/;
+
+// Catalogue artefacts and novelty variants that make a plan look random.
+const ODD =
+  /\bpov\b|\(version|\(variation|\bv\.? ?\d|\((male|female)\)|\[|\bon (floor|box|knees)\b|\blying floor\b|\bwall\b|glute bridge .*(press|crusher|fly)|explosive|plyo|pulse|\bjump|\bslam|\bto (bent over |hammer )?(row|curl|press)|with (calf raise|overhead press)|side shuffle|squeez|\bclock\b|\btowel\b|around|curtsey|spell caster|landmine 180|pull in sit/i;
+const UNILATERAL =
+  /\b(one|single) (arm|leg)\b|alternat|ipsilateral|contralateral|kneeling|half kneeling/i;
+
 function selectionScore(snapshot: Snapshot, candidate: Candidate) {
   let score = 0;
   const name = candidate.name;
+  const plain = name.toLowerCase().trim();
+  const { experience, goal, location } = snapshot.profile;
+  const beginner = experience === "BEGINNER";
+  const home = location === "HOME";
   const dates = familiarDates(snapshot, candidate).length;
   if (dates >= 2) score += 100;
   else if (dates) score += 30;
@@ -110,39 +141,57 @@ function selectionScore(snapshot: Snapshot, candidate: Candidate) {
   if (candidate.primary.some((m) => snapshot.profile.focusMuscles.includes(m)))
     score += 12;
   if (candidate.compound) score += 10;
-  if (/clock|towel|alternating.*press|around|twist.*press/i.test(name))
-    score -= 35;
-  if (
-    /machine|leverage|sled|cable/i.test(candidate.equipment) &&
-    snapshot.profile.location !== "HOME"
-  )
-    score += 18;
-  if (
-    /chest press|floor press|goblet squat|leg press|seated.*row|supported.*row|lat.*pull.?down|romanian.*deadlift|hip thrust|glute bridge|leg curl|lateral raise|pushdown|dead bug/i.test(
-      name,
-    )
-  )
-    score += 20;
+
+  if (STAPLES[candidate.region].test(plain)) score += 40;
+  if (PRIMARY.test(plain)) score += 10;
+  if (ODD.test(name)) score -= 40;
+  if (UNILATERAL.test(name)) score -= 10;
+  score -= Math.max(0, name.split(/\s+/).length - 4) * 3;
+
+  const machine = /machine|leverage|sled|cable|smith/i.test(candidate.equipment);
+  const freeWeight = /barbell|dumbbell/i.test(candidate.equipment);
+  if (!home && machine) score += beginner ? 16 : 8;
+  if (!beginner && freeWeight) score += 8;
+  if (/strong/i.test(goal) && !beginner && candidate.compound && /barbell/i.test(candidate.equipment))
+    score += 15;
+  if (/muscle/i.test(goal) && !beginner && (machine || freeWeight)) score += 4;
+
+  // Easier push-up regressions help beginners and bodyweight-only users only.
   if (/incline.*push.?up|wall.*push.?up|kneeling.*push.?up/i.test(name))
-    score += 20;
-  if (
-    /barbell/i.test(candidate.equipment) &&
-    snapshot.profile.experience === "BEGINNER" &&
-    dates < 2
-  )
+    score += beginner || home ? 20 : -20;
+  if (/barbell/i.test(candidate.equipment) && beginner && dates < 2)
     score -= 15;
   return score;
 }
 
+// Variants that differ only by camera angle, version or catalogue code.
+function canonicalName(name: string) {
+  return name
+    .toLowerCase()
+    .replace(/\[[^\]]*\]|\((back |side )?pov\)|\((version|variation)[^)]*\)|\bv\.? ?\d+\b|\bconventional\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function rankedCandidates(snapshot: Snapshot, region: Region) {
+  const seen = new Set<string>();
   return snapshot.candidates
     .filter((c) => c.region === region && exerciseEligible(snapshot, c))
+    .map((candidate) => ({ candidate, score: selectionScore(snapshot, candidate) }))
     .sort(
       (a, b) =>
-        selectionScore(snapshot, b) - selectionScore(snapshot, a) ||
-        a.name.localeCompare(b.name) ||
-        a.id.localeCompare(b.id),
-    );
+        b.score - a.score ||
+        a.candidate.name.length - b.candidate.name.length ||
+        a.candidate.name.localeCompare(b.candidate.name) ||
+        a.candidate.id.localeCompare(b.candidate.id),
+    )
+    .map(({ candidate }) => candidate)
+    .filter((candidate) => {
+      const key = canonicalName(candidate.name);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 
 export function groundedReason(

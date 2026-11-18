@@ -1,7 +1,10 @@
 // Planning and live sessions share these assumptions: four seconds per rep,
-// prescribed rests between sets, and 75 seconds to set up/change exercise.
+// the prescribed rest after every set (the last one covers catching breath
+// before moving on), and two minutes to walk over, load and set up the next
+// exercise. Real gym sessions run about 3 minutes per working set.
+export const CHANGEOVER_SECONDS = 120;
 export const prescriptionSeconds = (sets: number, reps: number, rest: number) =>
-  sets * reps * 4 + Math.max(0, sets - 1) * rest + 75;
+  sets * reps * 4 + Math.max(0, sets) * rest + CHANGEOVER_SECONDS;
 
 type Item = { targetSets: number; targetReps: string; restSeconds: number };
 export function prescribedWorkoutMinutes(items: Item[], warmupMinutes = 0) {

@@ -1,5 +1,11 @@
 import { activeLimitations, explicitExcludedMuscles } from "../common/constraints";
-import { resolvedSplit, focusedGroups } from "../common/training_style";
+import {
+  MAX_SESSION_EXERCISES,
+  ROTATION,
+  nextRotation,
+  resolvedSplit,
+  usesRotation,
+} from "../common/training_style";
 import {
   SelectedSchedule,
   validateSelectedSchedule,
@@ -36,7 +42,7 @@ import {
   foodAllowed,
 } from "../common/catalog";
 import { buildRegionInput, isFocusedRegion } from "../common/region_input";
-import { exerciseEligible } from "../common/coaching";
+import { exerciseEligible, rankedCandidates } from "../common/coaching";
 import { exerciseRules } from "../common/loading";
 import { prescriptionSeconds } from "../common/session_quality";
 import { enteredMeasurements, plannerSnapshot } from "../common/measurements";
@@ -84,6 +90,13 @@ export function hashContext(snapshot: Snapshot) {
   const context = Object.fromEntries(
     Object.entries(plannerSnapshot(snapshot))
       .filter(([key]) => key !== "onboardingStarter")
+      // rotationNext is derived from sessions, sets and the previous plan,
+      // which are already hashed; excluding it keeps pre-existing drafts fresh.
+      .map(([key, value]): [string, unknown] =>
+        key === "programmeMemory" && value && typeof value === "object"
+          ? [key, { ...(value as object), rotationNext: undefined }]
+          : [key, value],
+      )
       .map(([key, value]) => [
         key,
         Array.isArray(value)
@@ -580,6 +593,29 @@ export async function loadSnapshot(
     ).size,
   };
 
+  if (snapshot.programmeMemory && previous?.success) {
+    const regionOf = new Map(
+      snapshot.candidates.map((candidate) => [candidate.id, candidate.region]),
+    );
+    const trainedOn = new Set([
+      ...snapshot.sessions
+        .filter((session) => session.status === "COMPLETED")
+        .map((session) => session.date),
+      ...loggedDays,
+    ]);
+    const rotationNext = nextRotation(
+      previous.data.workouts
+        .filter((day) => !day.restDay && day.exercises.length)
+        .map((day) => ({
+          date: day.date,
+          mainRegion: regionOf.get(day.exercises[0]!.exerciseId),
+        })),
+      (date) => trainedOn.has(date),
+    );
+    if (rotationNext !== undefined)
+      snapshot.programmeMemory.rotationNext = rotationNext;
+  }
+
   snapshot.candidates = snapshot.candidates.filter((candidate) =>
     exerciseEligible(snapshot, candidate),
   );
@@ -654,58 +690,40 @@ export function trainingSchedule(snapshot: Snapshot): TrainingDay[] {
     );
   const home = snapshot.profile.location === "HOME";
 
-  const configuredSplit = resolvedSplit(snapshot.profile, dates.length);
-  // A short first week needs coverage, not the first two days of a six-day split.
-  const split =
-    (snapshot.selectedSchedule || snapshot.onboardingStarter) &&
-    dates.length < 3 &&
-    configuredSplit !== "CUSTOM"
-      ? "FULL_BODY"
-      : snapshot.onboardingStarter &&
-          configuredSplit === "MUSCLE_FOCUSED" &&
-          dates.length < 3 &&
-          snapshot.profile.minutes < 30
-        ? "FULL_BODY"
-        : configuredSplit;
-
-  const upper: Region[] = ["chest", "back", "shoulders", "biceps", "triceps"];
-
-  const lower: Region[] = ["legs", "core"];
-
-  const pushPullLegs: Region[][] = [
-    ["chest", "shoulders", "triceps"],
-    ["back", "biceps"],
-    ["legs", "core"],
-  ];
-
-  if (split === "PUSH_PULL_LEGS" && dates.length < 3) {
-    throw new PlannerError(
-      "INVALID_SPLIT",
-      "Push / pull / legs needs at least three training days.",
-      422,
-    );
-  }
-
-  if (
-    split === "MUSCLE_FOCUSED" &&
-    dates.length < 3 &&
-    snapshot.profile.minutes < 30
-  )
-    throw new PlannerError(
-      "INVALID_SPLIT",
-      "For two short sessions, choose full body or allow at least 30 minutes for a muscle-focused split.",
-      422,
-    );
+  // Short weeks are not forced into full body: rotating pairs simply continue
+  // next week from the last completed day.
+  const split = resolvedSplit(snapshot.profile, dates.length);
+  const rotating = usesRotation(split);
 
   const hasLimitations =
     explicitExcludedMuscles(snapshot.profile).size > 0 ||
     activeLimitations(snapshot.profile).size > 0;
   const trainableRegions = REGIONS.filter((region) => canTrain(region));
 
+  // Pairs reduced to what equipment and limitations allow; empty pairs are skipped.
+  const pairs = ROTATION.map((pair, group) => ({
+    group,
+    regions: pair.filter((region) => canTrain(region)),
+  })).filter((pair) => pair.regions.length);
+  const start = snapshot.programmeMemory?.rotationNext ?? 0;
+  const firstPair = Math.max(
+    0,
+    pairs.findIndex((pair) => pair.group >= start),
+  );
+
   return dates.map((date, index) => {
     let regions: Region[];
 
-    if (split === "CUSTOM") {
+    if (rotating && pairs.length) {
+      regions = [...pairs[(firstPair + index) % pairs.length]!.regions];
+      // Core is a small extra on the lower-body day when time allows.
+      if (
+        regions.includes("legs") &&
+        snapshot.profile.minutes >= 45 &&
+        canTrain("core")
+      )
+        regions.push("core");
+    } else if (split === "CUSTOM") {
       regions = snapshot.profile.customTrainingSplit?.[weekday(date)] ?? [];
 
       if (
@@ -721,19 +739,6 @@ export function trainingSchedule(snapshot: Snapshot): TrainingDay[] {
         }
         regions = trainableRegions.slice(0, 3);
       }
-    } else if (split === "MUSCLE_FOCUSED") {
-      regions = focusedGroups(dates.length)[index]!;
-    } else if (split === "PUSH_PULL_LEGS") {
-      regions = pushPullLegs[index % 3]!;
-    } else if (split === "UPPER_LOWER") {
-      if (index % 2 === 0 && snapshot.profile.minutes < 30) {
-        const accessory: Region[] = ["shoulders", "biceps", "triceps"];
-        regions = [
-          "chest",
-          "back",
-          accessory[Math.floor(index / 2) % accessory.length]!,
-        ];
-      } else regions = index % 2 === 0 ? upper : lower;
     } else {
       regions = (["chest", "back", "legs"] as Region[]).filter(
         (region) => region !== "back" || !home || canTrain(region),
@@ -797,14 +802,17 @@ export function trainingSchedule(snapshot: Snapshot): TrainingDay[] {
         .filter((c) => c.region === region && exerciseEligible(snapshot, c))
         .map((candidate) => {
           const rules = exerciseRules(snapshot, candidate, false);
+          // One complete working set is the least a covered region can get.
           return (
-            prescriptionSeconds(2, rules.minReps, rules.minRestSeconds) / 60
+            prescriptionSeconds(1, rules.minReps, rules.minRestSeconds) / 60
           );
         });
       return durations.length ? Math.min(...durations) : 4;
     };
 
-    if (snapshot.onboardingStarter) {
+    // Drop trailing accessory regions that cannot fit; explicit custom days
+    // still get a clear error instead of silently losing a chosen muscle.
+    if (snapshot.onboardingStarter || split !== "CUSTOM") {
       while (
         regions.length > 1 &&
         regions.reduce((sum, region) => sum + minimumShareFor(region), 0) >
@@ -866,8 +874,24 @@ export function trainingSchedule(snapshot: Snapshot): TrainingDay[] {
           return 2;
         return isFocus && snapshot.profile.minutes >= 55 ? 2 : 1;
       }
-      if (region === "legs") return isBeginner ? 3 : 4;
-      return isFocus ? 3 : isBeginner ? 2 : 3;
+      if (region === "core") return 1;
+      if (isBeginner && !isFocus && region !== regions[0]) return 2;
+      return 3;
+    };
+
+    // Size slots by the real time of a well-suited exercise at its recommended
+    // sets, so the session holds full sets rather than many two-set fragments.
+    const minutesPerExercise = (region: Region) => {
+      const top = rankedCandidates(snapshot, region)[0];
+      if (!top) return 4;
+      const rules = exerciseRules(snapshot, top, false);
+      return (
+        prescriptionSeconds(
+          rules.recommendedSets,
+          rules.recommendedReps,
+          rules.minRestSeconds,
+        ) / 60
+      );
     };
 
     const exerciseSlots = Object.fromEntries(
@@ -877,11 +901,70 @@ export function trainingSchedule(snapshot: Snapshot): TrainingDay[] {
           1,
           Math.min(
             maxSlotsForRegion(region),
-            Math.floor((minutesByRegion[region] ?? 0) / 4),
+            Math.floor(
+              (minutesByRegion[region] ?? 0) / minutesPerExercise(region),
+            ),
           ),
         ),
       ]),
     ) as Partial<Record<Region, number>>;
+
+    // Never more than six movements in one session: trim accessories first.
+    const slotTotal = () =>
+      regions.reduce((sum, region) => sum + (exerciseSlots[region] ?? 0), 0);
+    while (slotTotal() > MAX_SESSION_EXERCISES) {
+      const trimmable = [...regions]
+        .reverse()
+        .filter((region) => (exerciseSlots[region] ?? 0) > 1)
+        .sort(
+          (a, b) =>
+            Number(a === regions[0]) - Number(b === regions[0]) ||
+            (exerciseSlots[b] ?? 0) - (exerciseSlots[a] ?? 0),
+        )[0];
+      if (!trimmable) break;
+      exerciseSlots[trimmable] = exerciseSlots[trimmable]! - 1;
+    }
+
+    // Per-region rounding strands minutes; give each leftover whole exercise to
+    // the region with the fewest slots for its weight, then re-split minutes so
+    // every region's budget matches the exercises it is expected to hold.
+    const perExercise = Object.fromEntries(
+      regions.map((region) => [region, minutesPerExercise(region)]),
+    ) as Record<Region, number>;
+    const plannedMinutes = () =>
+      regions.reduce(
+        (sum, region) => sum + (exerciseSlots[region] ?? 0) * perExercise[region],
+        0,
+      );
+    let added = false;
+    while (slotTotal() < MAX_SESSION_EXERCISES) {
+      const next = regions
+        .map((region, position) => ({ region, weight: weights[position]! }))
+        .filter(
+          ({ region }) =>
+            (exerciseSlots[region] ?? 0) < maxSlotsForRegion(region) &&
+            plannedMinutes() + perExercise[region] <= availableMinutes,
+        )
+        .sort(
+          (a, b) =>
+            (exerciseSlots[a.region] ?? 0) / a.weight -
+              (exerciseSlots[b.region] ?? 0) / b.weight ||
+            regions.indexOf(a.region) - regions.indexOf(b.region),
+        )[0];
+      if (!next) break;
+      exerciseSlots[next.region] = (exerciseSlots[next.region] ?? 0) + 1;
+      added = true;
+    }
+    if (added) {
+      // Each region gets the time its exercises need plus a weighted share of
+      // any spare minutes, so focus muscles still receive the larger share.
+      const spare = Math.max(0, availableMinutes - plannedMinutes());
+      regions.forEach((region, position) => {
+        minutesByRegion[region] =
+          (exerciseSlots[region] ?? 0) * perExercise[region] +
+          (spare * weights[position]!) / totalWeight;
+      });
+    }
 
     return {
       date,

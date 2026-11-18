@@ -229,8 +229,36 @@ export function balanceWeeklyWorkload(
     }
   };
 
-  // Least disruptive first: everything keeps two working sets, then isolation
-  // accessories may drop to one set.
+  // Prefer fewer, complete exercises: first drop an accessory whose region
+  // still keeps two exercises that day, so recommended sets survive.
+  for (;;) {
+    const overages = workloadOverages(snapshot, balanced);
+    if (!overages.length) return balanced;
+    let target: { day: (typeof balanced)[number]; index: number } | undefined;
+    let bestScore = 0;
+    for (const day of balanced) {
+      day.exercises.forEach((exercise, index) => {
+        const candidate = byId.get(exercise.exerciseId);
+        if (!candidate || candidate.compound) return;
+        const others = day.exercises.filter(
+          (other, otherIndex) =>
+            otherIndex !== index &&
+            byId.get(other.exerciseId)?.region === candidate.region,
+        ).length;
+        if (others < 2) return;
+        const value = relief(exercise, overages);
+        if (value > bestScore) {
+          bestScore = value;
+          target = { day, index };
+        }
+      });
+    }
+    if (!target) break;
+    target.day.exercises.splice(target.index, 1);
+  }
+
+  // Then everything keeps two working sets, then isolation accessories may
+  // drop to one set.
   if (trimTo(() => 2)) return balanced;
   if (trimTo((e) => (byId.get(e.exerciseId)?.compound ? 2 : 1))) return balanced;
 

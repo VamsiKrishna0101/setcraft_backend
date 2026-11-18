@@ -111,7 +111,8 @@ export function fallbackChoices(
           (day.minutesByRegion?.[region] ?? day.minutesPerRegion) * 60 -
           seconds;
         while (
-          sets > (recovery ? 1 : 2) &&
+          // Short sessions may cover a region with one complete set.
+          sets > (recovery || selected.length === 0 ? 1 : 2) &&
           prescriptionSeconds(sets, reps, rest) > availableSeconds
         )
           sets--;

@@ -393,6 +393,36 @@ export function buildRegionalResult(
         };
       });
 
+      // From logged history on, working sets ramp up one equipment step at a
+      // time to the allowed top load; each set stays within its history ceiling.
+      const topKg = Math.max(
+        0,
+        ...setPrescriptions.map((set) => set.weightKg ?? 0),
+      );
+      if (
+        !candidate.bodyweight &&
+        guide.hasHistory &&
+        topKg > 0 &&
+        guide.step > 0 &&
+        sets >= 2
+      ) {
+        const floorKg = Math.max(guide.step, roundDown(topKg * 0.5, guide.step));
+        setPrescriptions.forEach((set, index) => {
+          const ramped = Math.max(
+            floorKg,
+            roundDown(topKg - guide.step * (sets - 1 - index), guide.step),
+          );
+          const ceiling = guide.setCeilingsKg[index];
+          set.weightKg = Math.min(ramped, topKg, ceiling ?? topKg);
+        });
+        for (let index = setPrescriptions.length - 2; index >= 0; index--) {
+          setPrescriptions[index]!.weightKg = Math.min(
+            setPrescriptions[index]!.weightKg!,
+            setPrescriptions[index + 1]!.weightKg!,
+          );
+        }
+      }
+
       const setWeights = setPrescriptions
         .map((set) => set.weightKg)
         .filter((weight): weight is number => weight != null);
@@ -912,23 +942,12 @@ export async function assembleNode(
             ?.exercises ?? [],
       ) ?? [];
 
-    const configuredSplit = resolvedSplit(
-      snapshot.profile,
-      state.schedule.length,
-    );
-    const split =
-      snapshot.selectedSchedule &&
-      state.schedule.length < 3 &&
-      configuredSplit !== "CUSTOM"
-        ? "FULL_BODY"
-        : configuredSplit;
+    const split = resolvedSplit(snapshot.profile, state.schedule.length);
     const name = !scheduled
       ? "Rest day"
       : limitedHome && split === "FULL_BODY"
         ? "Home foundations"
-        : split === "MUSCLE_FOCUSED"
-          ? `${scheduled.regions[0]![0]!.toUpperCase()}${scheduled.regions[0]!.slice(1)} focus`
-          : split === "FULL_BODY"
+        : split === "FULL_BODY"
             ? "Full body"
             : scheduled.regions
                 .map((region) => region[0]!.toUpperCase() + region.slice(1))

@@ -359,8 +359,11 @@ export async function addWorkoutItem(userId: string, input: AddWorkoutItemInput)
         throw new Error('This exercise uses time, distance, or assistance rather than standard load-and-repetition logging.');
     }
     let userWorkoutId = input.userWorkoutId;
-    if (userWorkoutId && !await prisma.userWorkout.findFirst({ where: { id: userWorkoutId, userId, session: null }, select: { id: true } })) {
-        throw new Error("Workout not found");
+    if (userWorkoutId) {
+        // Once today's workout is started, the app's plan id is the session snapshot; add there.
+        const plan = await prisma.userWorkout.findFirst({ where: { id: userWorkoutId, userId }, select: { session: { select: { status: true } } } });
+        if (!plan) throw new Error("Workout not found");
+        if (plan.session?.status === "COMPLETED") throw new Error("This workout is already finished.");
     }
     if (!userWorkoutId) {
         const existing = await prisma.userWorkout.findFirst({

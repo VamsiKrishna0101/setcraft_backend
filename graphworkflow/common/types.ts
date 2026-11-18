@@ -219,6 +219,8 @@ export type Snapshot = {
     weekStart: string;
     programme?: Programme;
     exerciseIds: string[];
+    // Index into ROTATION where this week's first training day continues.
+    rotationNext?: number;
   };
   // Legacy snapshots may contain these. They are stripped at the worker boundary
   // and are never used by the text-only workout planner.

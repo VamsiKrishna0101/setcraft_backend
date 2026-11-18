@@ -211,7 +211,77 @@ async function main() {
   assert.equal(exerciseRules(setup, setup.candidates[0]!, false).recommendedSets, 3);
   setup.profile.experience = 'BEGINNER';
   setup.profile.trainingSplit = 'MUSCLE_FOCUSED';
-  assert.deepEqual(trainingSchedule(setup)[0]!.regions, ['chest','shoulders','triceps']);
+  assert.deepEqual(trainingSchedule(setup)[0]!.regions, ['chest','triceps']);
+  {
+    // Every non-full-body split rotates two-muscle days, capped at six movements.
+    const {nextRotation} = await import('../graphworkflow/common/training_style');
+    const twoDays = fixture();
+    Object.assign(twoDays.profile, {experience: 'INTERMEDIATE', daysPerWeek: 2, minutes: 45, trainingSplit: 'AUTO'});
+    const week = trainingSchedule(twoDays);
+    assert.deepEqual(week.map(day => day.regions), [['chest','triceps'],['back','biceps']], 'Two days are not forced into full body');
+    for (const daysPerWeek of [2, 3, 4, 5, 6]) for (const minutes of [30, 45, 60]) {
+      const capped = fixture();
+      Object.assign(capped.profile, {experience: 'INTERMEDIATE', daysPerWeek, minutes, trainingSplit: 'UPPER_LOWER'});
+      for (const day of trainingSchedule(capped)) {
+        assert(Object.values(day.exerciseSlots).reduce((sum, n) => sum + (n ?? 0), 0) <= 6, 'At most six exercises per session');
+        assert(day.regions.filter(region => region !== 'core').length <= 2, 'Two muscle groups per day');
+      }
+    }
+    twoDays.programmeMemory = {planId: randomUUID(), weekStart: '2026-10-19', exerciseIds: [], rotationNext: 2};
+    assert.deepEqual(trainingSchedule(twoDays).map(day => day.regions), [['legs','shoulders','core'],['chest','triceps']], 'Next week continues the rotation');
+    const lastWeek = [{date: '2026-10-19', mainRegion: 'chest' as const}, {date: '2026-10-22', mainRegion: 'back' as const}];
+    assert.equal(nextRotation(lastWeek, date => date === '2026-10-19'), 1, 'A skipped day is trained next');
+    assert.equal(nextRotation(lastWeek, () => true), 2);
+    assert.equal(nextRotation(lastWeek, () => false), 0, 'Nothing completed repeats the week');
+    const withoutPointer = structuredClone(twoDays);
+    delete withoutPointer.programmeMemory!.rotationNext;
+    assert.equal(hashContext(twoDays), hashContext(withoutPointer), 'Drafts saved before rotation existed stay fresh');
+
+    // Logged lifts ramp across working sets; first-time lifts still get no kg.
+    const ramp = fixture();
+    Object.assign(ramp.profile, {experience: 'INTERMEDIATE', trainingSplit: 'FULL_BODY'});
+    const press = ramp.candidates.find(c => c.name === 'Machine chest press')!;
+    ramp.sets = ['2026-10-13', '2026-10-16'].flatMap(date => [1, 2, 3].map(set => ({
+      id: randomUUID(), exerciseId: press.id, date, set, reps: 12, weight: 40, rpe: 6, synthetic: false,
+      plannedRepsMin: 12, plannedRepsMax: 12, plannedSets: 3,
+    })));
+    const rampPlan = (await baseline(ramp)).plan;
+    validatePlan(ramp, rampPlan);
+    const logged = rampPlan.workouts.flatMap(day => day.exercises).find(e => e.exerciseId === press.id)!;
+    const loads = logged.setPrescriptions.map(set => set.weightKg!);
+    assert(loads.length >= 2 && loads.every((kg, i) => i === 0 || kg >= loads[i - 1]!), `Set loads ramp upward: ${loads}`);
+    assert(loads[0]! < loads.at(-1)!, `First set is lighter than the top set: ${loads}`);
+    assert.equal(loads.at(-1), logged.weightKg);
+    // Staples beat catalogue oddities; camera-angle duplicates collapse; the AI
+    // sees a short list that still covers every movement pattern.
+    const {shortlist} = await import('../graphworkflow/common/region_input');
+    const picky = fixture();
+    Object.assign(picky.profile, {experience: 'INTERMEDIATE', goal: 'BUILD_MUSCLE'});
+    picky.profile.equipmentIds = [];
+    picky.profile.equipment = ['DUMBBELLS', 'MACHINES', 'CABLE', 'BARBELLS', 'BENCH'];
+    picky.candidates.push(
+      candidate('chest', 'Forearms to Wide Grip Wall Push up', 'body weight'),
+      candidate('chest', 'Dumbbell Glute Bridge Chest Press'),
+      candidate('chest', 'Dumbbell Bench Press'),
+      candidate('legs', 'Sled 45 Degree Leg Press', 'sled machine', ['quads']),
+      candidate('legs', 'Sled 45 Degree Leg Press (Back POV)', 'sled machine', ['quads']),
+      candidate('legs', 'Barbell Pause Lunge', 'barbell', ['quads']),
+      ...Array.from({length: 20}, (_, i) => candidate('legs', `Lever Odd Leg Press Variation ${i}`, 'leverage machine', ['quads'])),
+    );
+    picky.candidates.at(-21)!.difficulty = 'ADVANCED';
+    const chest = rankedCandidates(picky, 'chest').map(c => c.name);
+    assert(chest.indexOf('Dumbbell Bench Press') < chest.indexOf('Forearms to Wide Grip Wall Push up'), `Staple first: ${chest}`);
+    assert(chest.indexOf('Dumbbell Bench Press') < chest.indexOf('Dumbbell Glute Bridge Chest Press'));
+    const legs = rankedCandidates(picky, 'legs').map(c => c.name);
+    assert.equal(legs.filter(n => /^Sled 45 Degree Leg Press/.test(n)).length, 1, 'POV duplicates collapse');
+    assert(!legs.includes('Barbell Pause Lunge'), 'Intermediate users get no unlogged advanced lifts');
+    const short = shortlist(picky, 'legs');
+    assert(short.length <= 12);
+    for (const pattern of new Set(rankedCandidates(picky, 'legs').map(movementOf)))
+      assert(short.some(c => movementOf(c) === pattern), `Shortlist keeps ${pattern}`);
+    assert(rampPlan.workouts.flatMap(day => day.exercises).filter(e => e.exerciseId !== press.id && !e.weightKg)
+      .every(e => e.weightKg == null || e.weightKg === 0), 'Unlogged lifts keep "choose a comfortable load"');
+  }
   setup.profile.trainingSplit = 'CUSTOM';
   setup.profile.trainingDays = ['MONDAY', 'THURSDAY'];
   setup.profile.customTrainingSplit = {MONDAY:['chest','triceps'],THURSDAY:['back','legs','biceps','core']};
@@ -359,14 +429,6 @@ async function main() {
           minutes,
           trainingSplit,
         });
-        if (
-          daysPerWeek === 2 &&
-          minutes === 20 &&
-          trainingSplit === "MUSCLE_FOCUSED"
-        ) {
-          assert.throws(() => trainingSchedule(frequency), /full body/);
-          continue;
-        }
         const planned = await baseline(frequency);
         validatePlan(frequency, planned.plan);
         assert.equal(
